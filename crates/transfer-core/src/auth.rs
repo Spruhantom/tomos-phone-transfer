@@ -109,7 +109,7 @@ mod tests {
         let expected_server = server.public_identity();
         let (mut a, mut b) = duplex(4096);
         let server_task = async {
-            authenticate_server(&mut a, &server, "one-time-secret", |_| async { true }).await
+            authenticate_server(&mut a, &server, &OneTimePairingToken::new("one-time-secret".into()), |_| async { true }).await
         };
         let client_task = async {
             authenticate_client(&mut b, &client, &expected_server, "one-time-secret").await
