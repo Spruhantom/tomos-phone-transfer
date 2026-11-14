@@ -1,4 +1,4 @@
-use crate::identity::{verify_proof, IdentityProof, LocalIdentity, PublicIdentity};
+use crate::{identity::{verify_proof, IdentityProof, LocalIdentity, PublicIdentity}, pairing::OneTimePairingToken};
 use rand::{rngs::OsRng, RngCore};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::future::Future;
@@ -46,7 +46,7 @@ async fn receive<R: AsyncRead + Unpin, T: DeserializeOwned>(stream: &mut R) -> R
 /// single-use invitation token retained by the inviting device. approve_client must
 /// prompt the user before trusting a previously unknown device identity.
 pub async fn authenticate_server<S, F, Fut>(
-    stream: &mut S, local: &LocalIdentity, expected_token: &str, approve_client: F,
+    stream: &mut S, local: &LocalIdentity, token_guard: &OneTimePairingToken, approve_client: F,
 ) -> Result<PublicIdentity, AuthenticationError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -62,7 +62,7 @@ where
         AuthMessage::Response { identity, proof, client_nonce, invitation_token } => (identity, proof, client_nonce, invitation_token),
         _ => return Err(AuthenticationError::InvalidFrame),
     };
-    if token != expected_token { return Err(AuthenticationError::InvalidToken); }
+    if !token_guard.consume(&token) { return Err(AuthenticationError::InvalidToken); }
     if !verify_proof(&client_identity, &proof, &nonce) { return Err(AuthenticationError::InvalidIdentity); }
     if !approve_client(&client_identity).await { return Err(AuthenticationError::Declined); }
     send(stream, &AuthMessage::ServerProof { proof: local.prove(client_nonce) }).await?;
