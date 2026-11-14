@@ -72,12 +72,20 @@ impl PairingInvitation {
 /// In-memory single-use token guard. Create a fresh guard for each QR invitation;
 /// consuming it prevents replaying the same QR pairing secret for another session.
 #[derive(Default)]
-pub struct OneTimePairingToken(std::sync::Mutex<Option<String>>);
+pub struct OneTimePairingToken { token: std::sync::Mutex<Option<String>>, expires_at: u64 }
 
 impl OneTimePairingToken {
-    pub fn new(token: String) -> Self { Self(std::sync::Mutex::new(Some(token))) }
+    pub fn new(token: String) -> Self {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        Self { token: std::sync::Mutex::new(Some(token)), expires_at: now.saturating_add(600) }
+    }
+    pub fn from_invitation(invitation: &PairingInvitation) -> Self {
+        Self { token: std::sync::Mutex::new(Some(invitation.token.clone())), expires_at: invitation.expires_at }
+    }
     pub fn consume(&self, presented: &str) -> bool {
-        let Ok(mut stored) = self.0.lock() else { return false; };
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(u64::MAX);
+        if now > self.expires_at { return false; }
+        let Ok(mut stored) = self.token.lock() else { return false; };
         match stored.take() {
             Some(expected) => constant_time_equal(expected.as_bytes(), presented.as_bytes()),
             None => false,
