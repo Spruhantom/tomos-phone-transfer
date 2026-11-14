@@ -1,8 +1,14 @@
 //! Shared, platform-independent primitives for TomOS Transfer.
-//! Network transports must authenticate peers and encrypt sessions before accepting data.
+//! All network payloads must run over TLS 1.3 and complete identity authentication
+//! before the application invokes the file transfer functions.
 pub mod chunks;
 pub mod device;
+pub mod discovery;
+pub mod identity;
+pub mod network;
+pub mod pairing;
 pub mod protocol;
+pub mod tls;
 pub mod transfer;
 pub mod verification;
 
