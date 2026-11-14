@@ -19,7 +19,7 @@ impl Discovery {
 
     pub fn advertise(&self, instance: &str, host: &str, address: IpAddr, port: u16, device_id: &str) -> Result<(), DiscoveryError> {
         let properties = [("device_id", device_id), ("protocol", "1")];
-        let service = ServiceInfo::new(SERVICE_TYPE, instance, host, address, port, &properties)
+        let service = ServiceInfo::new(SERVICE_TYPE, instance, host, address, port, &properties[..])
             .map_err(|e| DiscoveryError::Mdns(e.to_string()))?;
         self.daemon.register(service).map_err(|e| DiscoveryError::Mdns(e.to_string()))
     }
