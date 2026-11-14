@@ -24,6 +24,14 @@ impl LocalIdentity {
     pub fn generate() -> Self {
         Self { device_id: Uuid::new_v4(), signing_key: SigningKey::generate(&mut OsRng) }
     }
+    /// Restore an identity from a secret retrieved from the platform keystore.
+    pub fn from_secret(device_id: Uuid, secret: [u8; 32]) -> Self {
+        Self { device_id, signing_key: SigningKey::from_bytes(&secret) }
+    }
+    /// Export only for storage in Android Keystore or the Linux Secret Service.
+    /// Do not write this value to logs, QR codes, or ordinary shared files.
+    pub fn secret_bytes(&self) -> [u8; 32] { self.signing_key.to_bytes() }
+
     pub fn public_identity(&self) -> PublicIdentity {
         PublicIdentity { device_id: self.device_id, public_key: self.signing_key.verifying_key().to_bytes() }
     }
