@@ -123,3 +123,8 @@ cargo run --release -p tomos-transfer-linux -- send 'tomos-transfer://pair/…' 
 ```
 
 The Linux receiver prompts separately to trust the peer and accept the offered file. Receiving uses the core's resumable checkpoint pipeline. The listener binds to all interfaces on an ephemeral TCP port; the host/IP printed into the QR is supplied by the operator and must be reachable from the peer.
+
+
+The UniFFI surface now also includes opaque long-lived Ed25519 and TLS identity handles, TLS certificate/private-key export specifically for platform secure storage, a receiver factory that binds its socket before returning the matching QR payload, and an approved one-shot resumable receive operation with peer/file approval and progress callbacks. The Android TLS store encrypts the certificate/private-key record with the same non-exportable Android Keystore wrapping key as the device identity.
+
+The sender bridge accepts a stable transfer UUID so a retry can resume against a receiver's checkpoint. The receiving side consumes each QR token once; after an interrupted session, the receiver must issue a fresh QR while retaining the resume state directory.
