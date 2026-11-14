@@ -51,8 +51,10 @@ class AndroidTlsIdentityStore(context: Context) {
             require(buffer.remaining() == certificateSize + privateKeySize) {
                 "TLS identity payload length mismatch"
             }
-            val certificate = ByteArray(certificateSize).also(buffer::get)
-            val privateKey = ByteArray(privateKeySize).also(buffer::get)
+            val certificate = ByteArray(certificateSize)
+            buffer.get(certificate)
+            val privateKey = ByteArray(privateKeySize)
+            buffer.get(privateKey)
             return StoredTlsIdentity(certificate, privateKey)
         } finally {
             plain.fill(0)
