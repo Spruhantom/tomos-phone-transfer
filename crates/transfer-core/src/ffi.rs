@@ -472,4 +472,22 @@ mod tests {
         assert_eq!(restored.certificate_der(), certificate);
         assert_eq!(restored.fingerprint(), generated.fingerprint());
     }
+
+
+    #[test]
+    fn receiver_binds_socket_and_creates_matching_pairing_qr() {
+        let id = Uuid::new_v4();
+        let identity = TransferIdentity::restore(id.to_string(), vec![8; 32]).unwrap();
+        let tls = TlsIdentityHandle::generate().unwrap();
+        let receiver = identity.create_receiver(
+            "127.0.0.1".to_string(),
+            "127.0.0.1:0".to_string(),
+            tls,
+            120,
+        ).unwrap();
+        let invitation = PairingInvitation::parse_qr_payload(&receiver.pairing_payload()).unwrap();
+        assert_eq!(invitation.identity.device_id, id);
+        assert_eq!(invitation.port, receiver.port());
+        assert!(invitation.trusted_certificate_der().is_ok());
+    }
 }
