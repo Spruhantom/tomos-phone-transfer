@@ -100,3 +100,28 @@ fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
     for (a, b) in left.iter().zip(right) { difference |= a ^ b; }
     black_box(difference) == 0
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qr_invitation_round_trips_and_pins_certificate() {
+        use crate::identity::LocalIdentity;
+        use sha2::{Digest, Sha256};
+        let certificate = b"fake-certificate-der".to_vec();
+        let fingerprint = Sha256::digest(&certificate).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let invitation = PairingInvitation::create(
+            LocalIdentity::generate().public_identity(),
+            "192.168.1.20".into(), 43120, fingerprint, certificate.clone(), 120,
+        ).unwrap();
+        let payload = invitation.to_qr_payload().unwrap();
+        let decoded = PairingInvitation::parse_qr_payload(&payload).unwrap();
+        assert_eq!(decoded.trusted_certificate_der().unwrap(), certificate);
+        assert!(decoded.qr_code().is_ok());
+        let guard = OneTimePairingToken::from_invitation(&decoded);
+        assert!(guard.consume(&decoded.token));
+        assert!(!guard.consume(&decoded.token));
+    }
+}
