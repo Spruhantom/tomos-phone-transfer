@@ -7,7 +7,7 @@ use uuid::Uuid;
 /// storage (Android Keystore / Linux Secret Service); never advertise it.
 pub struct LocalIdentity { pub device_id: Uuid, signing_key: SigningKey }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PublicIdentity {
     pub device_id: Uuid,
     pub public_key: [u8; 32],
