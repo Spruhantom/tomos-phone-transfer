@@ -5,7 +5,8 @@
 //! the seed in an ordinary file.
 use crate::{
     identity::LocalIdentity,
-    pairing::PairingInvitation,
+    pairing::{OneTimePairingToken, PairingInvitation},
+    tcp::{accept_one_resumable, connect_and_send_with_id},
     tls::DeviceTlsIdentity,
 };
 use serde_json::json;
@@ -203,7 +204,7 @@ impl TransferReceiver {
         &self,
         destination_dir: String,
         state_dir: String,
-        callbacks: Arc<dyn TransferCallbacks>,
+        callbacks: Box<dyn TransferCallbacks>,
     ) -> String {
         let listener = match self.listener.lock() {
             Ok(mut listener) => match listener.take() {
@@ -217,6 +218,7 @@ impl TransferReceiver {
             Err(_) => return error_json("receiver identity lock poisoned"),
         };
         let token_guard = OneTimePairingToken::from_invitation(&self.invitation);
+        let callbacks: Arc<dyn TransferCallbacks> = Arc::from(callbacks);
         let runtime = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -394,8 +396,9 @@ impl TransferIdentity {
         source_path: String,
         remote_name: String,
         transfer_id: String,
-        callbacks: Arc<dyn TransferProgressCallbacks>,
+        callbacks: Box<dyn TransferProgressCallbacks>,
     ) -> String {
+        let callbacks: Arc<dyn TransferProgressCallbacks> = Arc::from(callbacks);
         let invitation = match PairingInvitation::parse_qr_payload(&invitation_payload) {
             Ok(value) => value,
             Err(error) => return error_json(error),
