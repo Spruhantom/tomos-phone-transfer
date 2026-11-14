@@ -160,6 +160,12 @@ impl TlsIdentityHandle {
 }
 
 
+/// Progress notifications for an outgoing transfer.
+#[uniffi::export(callback_interface)]
+pub trait TransferProgressCallbacks: Send + Sync {
+    fn on_progress(&self, bytes_sent: u64, total_bytes: u64, bytes_per_second: u64);
+}
+
 /// User approval and progress callbacks for a receiving session. Implementations
 /// must present the peer/file details to the user and return explicit approval.
 #[uniffi::export(callback_interface)]
@@ -388,6 +394,7 @@ impl TransferIdentity {
         source_path: String,
         remote_name: String,
         transfer_id: String,
+        callbacks: Arc<dyn TransferProgressCallbacks>,
     ) -> String {
         let invitation = match PairingInvitation::parse_qr_payload(&invitation_payload) {
             Ok(value) => value,
@@ -418,7 +425,11 @@ impl TransferIdentity {
             &source,
             &remote_name,
             transfer_id,
-            |_| {},
+            |progress| callbacks.on_progress(
+                progress.bytes_received,
+                progress.total_bytes,
+                progress.bytes_per_second,
+            ),
         )) {
             Ok(()) => json!({ "ok": true, "transfer_id": transfer_id }).to_string(),
             Err(error) => error_json(error),
