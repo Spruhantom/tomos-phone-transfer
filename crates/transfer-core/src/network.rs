@@ -208,7 +208,7 @@ where
             .map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
         loaded
     } else {
-        let fresh = ResumeManifest::new(transfer_id, file_name.clone(), size_bytes, sha256.clone(), DEFAULT_CHUNK_SIZE as u32)
+        let mut fresh = ResumeManifest::new(transfer_id, file_name.clone(), size_bytes, sha256.clone(), DEFAULT_CHUNK_SIZE as u32)
             .map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
         fresh.save_atomic(&manifest_path).await.map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
         fresh
