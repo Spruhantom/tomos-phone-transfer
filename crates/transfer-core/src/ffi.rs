@@ -319,4 +319,17 @@ mod tests {
             serde_json::from_str(&handle.prove_challenge_json(vec![6; 32])).unwrap();
         assert!(crate::identity::verify_proof(&public, &proof, &[6; 32]));
     }
+
+
+    #[test]
+    fn tls_handle_restores_certificate_and_private_key() {
+        let generated = TlsIdentityHandle::generate().unwrap();
+        let certificate = generated.certificate_der();
+        let private_key = generated.private_key_der_for_secure_storage();
+        assert!(!certificate.is_empty());
+        assert!(!private_key.is_empty());
+        let restored = TlsIdentityHandle::restore(certificate.clone(), private_key).unwrap();
+        assert_eq!(restored.certificate_der(), certificate);
+        assert_eq!(restored.fingerprint(), generated.fingerprint());
+    }
 }
