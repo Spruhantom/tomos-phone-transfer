@@ -78,3 +78,53 @@ GitHub Actions validates the Rust workspace and builds the Android debug applica
 ## License
 
 License to be selected before the first public release.
+
+
+## Native engine bridge (Phase 3)
+
+Android and Linux are being connected to the same Rust transfer engine through UniFFI. The Rust crate is built as both an `rlib` and `cdylib`; the platform application owns secure persistence and passes the Ed25519 seed to an opaque Rust identity handle only when restoring the session.
+
+The first exported operations cover identity restoration, public identity retrieval, challenge proofs, pairing QR payload generation, and scanned invitation validation. The QR certificate fingerprint is checked in Rust. A valid invitation is not by itself an authenticated session: the TLS 1.3 certificate pin and mutual Ed25519 challenge-response handshake must still complete before a transfer.
+
+### Build Android native libraries and Kotlin bindings
+
+Install Rust, Android SDK/NDK, `cargo-ndk`, and `uniffi-bindgen-cli` 0.29.4, then run:
+
+```bash
+bash scripts/build-android-native.sh
+gradle :android:assembleDebug
+```
+
+The script builds Android ABI libraries for arm64-v8a, armeabi-v7a, and x86_64 under `android/src/main/jniLibs`, then generates Kotlin bindings into the Android source tree.
+
+**Integration status:** the exported native identity and pairing surface is under development. The Android UI is not yet wired to the native listener, authenticated TLS transfer session, receive approval, progress callbacks, or resume controls. Linux secure-storage and UI adapters are also outstanding. Do not treat the current Android UI as a working file-transfer client yet.
+
+
+## Linux client
+
+The `tomos-transfer` Linux command-line client is part of the workspace and uses the same Rust transfer core as Android. Device identity seeds and the TLS private key are stored in the desktop Secret Service through `secret-tool`; neither is written to ordinary files.
+
+Install the Secret Service command-line utility (Debian/Ubuntu: `sudo apt install libsecret-tools`) and build:
+
+```bash
+cargo build --release -p tomos-transfer-linux
+```
+
+Start a receiver, advertising an IP address reachable by the sender:
+
+```bash
+cargo run --release -p tomos-transfer-linux -- receive 192.168.1.20 ~/Downloads/Received
+```
+
+Scan the displayed pairing QR code from the sending device. To send from Linux, pass the scanned QR payload and file:
+
+```bash
+cargo run --release -p tomos-transfer-linux -- send 'tomos-transfer://pair/…' ./photo.jpg
+```
+
+The Linux receiver prompts separately to trust the peer and accept the offered file. Receiving uses the core's resumable checkpoint pipeline. The listener binds to all interfaces on an ephemeral TCP port; the host/IP printed into the QR is supplied by the operator and must be reachable from the peer.
+
+
+The UniFFI surface now also includes opaque long-lived Ed25519 and TLS identity handles, TLS certificate/private-key export specifically for platform secure storage, a receiver factory that binds its socket before returning the matching QR payload, and an approved one-shot resumable receive operation with peer/file approval and progress callbacks. The Android TLS store encrypts the certificate/private-key record with the same non-exportable Android Keystore wrapping key as the device identity.
+
+The sender bridge accepts a stable transfer UUID so a retry can resume against a receiver's checkpoint. The receiving side consumes each QR token once; after an interrupted session, the receiver must issue a fresh QR while retaining the resume state directory.
