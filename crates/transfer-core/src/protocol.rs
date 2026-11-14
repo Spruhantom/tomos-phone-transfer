@@ -9,7 +9,7 @@ pub enum ControlMessage {
     PairingAccepted { device_id: Uuid, protocol_version: u16 },
     TransferOffer { transfer_id: Uuid, file_name: String, size_bytes: u64, sha256: String },
     TransferAccepted { transfer_id: Uuid },
-    TransferResumeAccepted { transfer_id: Uuid, offset: u64 },
+    TransferResumeAccepted { transfer_id: Uuid, offset: u64, prefix_sha256: String },
     TransferRejected { transfer_id: Uuid, reason: String },
     TransferComplete { transfer_id: Uuid, sha256: String },
     CancelTransfer { transfer_id: Uuid },
