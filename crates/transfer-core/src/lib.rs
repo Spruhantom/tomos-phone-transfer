@@ -13,7 +13,7 @@ pub mod resume;
 pub mod tls;
 pub mod tcp;
 pub mod transfer;
-pub mod verification;
+pub mod verification;\npub mod ffi;\n\nuniffi::setup_scaffolding!();
 
 pub use device::{DeviceIdentity, DeviceInfo};
 pub use transfer::{receive_file, TransferError, TransferProgress, TransferResult};
