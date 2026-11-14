@@ -159,3 +159,88 @@ async fn hash_prefix(path: &Path, length: u64) -> Result<String, NetworkTransfer
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+
+
+/// Receives a file with durable checkpoints. If the socket drops, the manifest and
+/// partial file remain; retry the same transfer ID to continue at the last committed
+/// chunk. The final whole-file SHA-256 is always checked before publishing the file.
+pub async fn receive_one_resumable<S, F, A>(
+    stream: &mut S,
+    destination_dir: &Path,
+    state_dir: &Path,
+    approve: A,
+    mut on_progress: F,
+) -> Result<TransferResult, NetworkTransferError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    F: FnMut(TransferProgress),
+    A: FnOnce(&str, u64, &str) -> bool,
+{
+    use crate::resume::ResumeManifest;
+    use tokio::fs;
+
+    let (transfer_id, file_name, size_bytes, sha256) = match read_frame::<_, ControlMessage>(stream).await? {
+        ControlMessage::TransferOffer { transfer_id, file_name, size_bytes, sha256 } =>
+            (transfer_id, file_name, size_bytes, sha256),
+        _ => return Err(NetworkTransferError::Protocol("expected transfer offer".into())),
+    };
+    if !validate_file_name(&file_name) {
+        write_frame(stream, &ControlMessage::TransferRejected { transfer_id, reason: "unsafe filename".into() }).await?;
+        return Err(NetworkTransferError::Protocol("unsafe filename".into()));
+    }
+    if !approve(&file_name, size_bytes, &sha256) {
+        write_frame(stream, &ControlMessage::TransferRejected { transfer_id, reason: "declined by recipient".into() }).await?;
+        return Err(NetworkTransferError::Rejected("declined by recipient".into()));
+    }
+
+    fs::create_dir_all(destination_dir).await?;
+    fs::create_dir_all(state_dir).await?;
+    let manifest_path = state_dir.join(format!("{}.tomos-transfer.json", transfer_id));
+    let partial_path = state_dir.join(format!("{}.tomos-transfer.part", transfer_id));
+    let mut manifest = if fs::try_exists(&manifest_path).await? {
+        let loaded = ResumeManifest::load(&manifest_path).await
+            .map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
+        if !loaded.matches_offer(transfer_id, &file_name, size_bytes, &sha256) {
+            return Err(NetworkTransferError::Protocol("resume state does not match this transfer offer".into()));
+        }
+        loaded.recover_partial(&partial_path).await
+            .map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
+        loaded
+    } else {
+        let fresh = ResumeManifest::new(transfer_id, file_name.clone(), size_bytes, sha256.clone(), DEFAULT_CHUNK_SIZE as u32)
+            .map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
+        fresh.save_atomic(&manifest_path).await.map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
+        fresh
+    };
+
+    let offset = manifest.committed_bytes;
+    let prefix_sha256 = if offset == 0 { String::new() } else { hash_prefix(&partial_path, offset).await? };
+    write_frame(stream, &ControlMessage::TransferResumeAccepted { transfer_id, offset, prefix_sha256 }).await?;
+
+    let started = Instant::now();
+    let mut remaining = size_bytes.saturating_sub(offset);
+    while remaining > 0 {
+        let count = remaining.min(manifest.chunk_size as u64) as usize;
+        let mut chunk = vec![0_u8; count];
+        stream.read_exact(&mut chunk).await?;
+        manifest.append_chunk(&partial_path, manifest.committed_bytes, &chunk).await
+            .map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
+        manifest.save_atomic(&manifest_path).await
+            .map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
+        remaining -= count as u64;
+        let elapsed = started.elapsed().as_secs_f64().max(0.001);
+        on_progress(TransferProgress {
+            bytes_received: manifest.committed_bytes,
+            total_bytes: size_bytes,
+            bytes_per_second: ((manifest.committed_bytes - offset) as f64 / elapsed) as u64,
+        });
+    }
+
+    let destination = destination_dir.join(&file_name);
+    let result_path = manifest.finalize(&partial_path, &destination).await
+        .map_err(|e| NetworkTransferError::Protocol(e.to_string()))?;
+    let _ = fs::remove_file(&manifest_path).await;
+    let result = TransferResult { path: result_path, bytes_received: size_bytes, sha256: sha256.clone() };
+    write_frame(stream, &ControlMessage::TransferComplete { transfer_id, sha256 }).await?;
+    Ok(result)
+}
