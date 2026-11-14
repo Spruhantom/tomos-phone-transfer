@@ -70,3 +70,44 @@ where P: FnMut(TransferProgress) {
     send_file(&mut tls, source, remote_name, on_progress).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{pairing::OneTimePairingToken, tls::DeviceTlsIdentity};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn authenticated_tls_tcp_transfer() {
+        let sender_identity = LocalIdentity::generate();
+        let receiver_identity = LocalIdentity::generate();
+        let tls_identity = DeviceTlsIdentity::generate().unwrap();
+        let acceptor = tls_identity.server_acceptor().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let invitation = PairingInvitation::create(
+            receiver_identity.public_identity(), address.ip().to_string(), address.port(),
+            tls_identity.fingerprint.clone(), tls_identity.certificate_der.clone(), 120,
+        ).unwrap();
+        let token_guard = OneTimePairingToken::new(invitation.token.clone());
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let source = src_dir.path().join("payload.bin");
+        let data = vec![91_u8; 128 * 1024];
+        tokio::fs::write(&source, &data).await.unwrap();
+
+        let server = async {
+            accept_one(&listener, &acceptor, &receiver_identity, &token_guard, dst_dir.path(),
+                |_| async { true },
+                |name, size, _| name == "payload.bin" && size == data.len() as u64,
+                |_| {}).await
+        };
+        let client = async {
+            connect_and_send(&invitation, &sender_identity, &source, "payload.bin", |_| {}).await
+        };
+        let (received, sent) = tokio::join!(server, client);
+        sent.unwrap();
+        let (_, result) = received.unwrap();
+        assert_eq!(tokio::fs::read(result.path).await.unwrap(), data);
+    }
+}
