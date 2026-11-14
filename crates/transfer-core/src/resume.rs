@@ -58,6 +58,9 @@ impl ResumeManifest {
     /// Reconcile a crash that occurred after writing file bytes but before saving
     /// the manifest: truncate uncommitted tail bytes, then verify every checkpoint.
     pub async fn recover_partial(&self, partial_path: &Path) -> Result<(), ResumeError> {
+        if !fs::try_exists(partial_path).await? && self.committed_bytes == 0 {
+            OpenOptions::new().create_new(true).write(true).open(partial_path).await?;
+        }
         let file = OpenOptions::new().write(true).open(partial_path).await?;
         let actual_len = file.metadata().await?.len();
         if actual_len < self.committed_bytes { return Err(ResumeError::PartialFileMismatch); }
