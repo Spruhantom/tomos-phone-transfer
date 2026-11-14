@@ -10,6 +10,7 @@ use crate::{
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+use std::sync::{Arc, Mutex};
 
 fn error_json(message: impl std::fmt::Display) -> String {
     json!({ "ok": false, "error": message.to_string() }).to_string()
@@ -108,6 +109,89 @@ pub fn validate_pairing_payload(payload: String) -> String {
             "expires_at": invitation.expires_at
         }).to_string(),
         Err(error) => error_json(error),
+    }
+}
+
+
+/// Opaque, long-lived native identity handle. Platform code keeps this handle
+/// for the active session; the secret key is never returned through UniFFI.
+#[derive(uniffi::Object)]
+pub struct TransferIdentity {
+    identity: Mutex<LocalIdentity>,
+}
+
+#[uniffi::export]
+impl TransferIdentity {
+    /// Restore an existing identity from a seed retrieved from secure storage.
+    /// Invalid input returns None rather than generating a replacement identity.
+    #[uniffi::constructor]
+    pub fn restore(device_id: String, mut seed: Vec<u8>) -> Option<Arc<Self>> {
+        if seed.len() != 32 {
+            seed.fill(0);
+            return None;
+        }
+        let id = match Uuid::parse_str(&device_id) {
+            Ok(value) => value,
+            Err(_) => {
+                seed.fill(0);
+                return None;
+            }
+        };
+        let secret: [u8; 32] = match seed.as_slice().try_into() {
+            Ok(value) => value,
+            Err(_) => {
+                seed.fill(0);
+                return None;
+            }
+        };
+        seed.fill(0);
+        Some(Arc::new(Self {
+            identity: Mutex::new(LocalIdentity::from_secret(id, secret)),
+        }))
+    }
+
+    pub fn public_identity_json(&self) -> String {
+        match self.identity.lock() {
+            Ok(identity) => serde_json::to_string(&identity.public_identity())
+                .unwrap_or_else(|error| error_json(error)),
+            Err(_) => error_json("identity lock poisoned"),
+        }
+    }
+
+    pub fn prove_challenge_json(&self, challenge: Vec<u8>) -> String {
+        let challenge: [u8; 32] = match challenge.as_slice().try_into() {
+            Ok(value) => value,
+            Err(_) => return error_json("challenge must contain exactly 32 bytes"),
+        };
+        match self.identity.lock() {
+            Ok(identity) => serde_json::to_string(&identity.prove(challenge))
+                .unwrap_or_else(|error| error_json(error)),
+            Err(_) => error_json("identity lock poisoned"),
+        }
+    }
+
+    pub fn create_pairing_payload(
+        &self,
+        host: String,
+        port: u16,
+        certificate_der: Vec<u8>,
+        lifetime_seconds: u64,
+    ) -> String {
+        if certificate_der.is_empty() || host.trim().is_empty() || port == 0 {
+            return error_json("host, port and TLS certificate are required");
+        }
+        let identity = match self.identity.lock() {
+            Ok(identity) => identity.public_identity(),
+            Err(_) => return error_json("identity lock poisoned"),
+        };
+        let fingerprint = Sha256::digest(&certificate_der)
+            .iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        match PairingInvitation::create(
+            identity, host, port, fingerprint, certificate_der, lifetime_seconds,
+        ).and_then(|invitation| invitation.to_qr_payload()) {
+            Ok(payload) => json!({ "ok": true, "payload": payload }).to_string(),
+            Err(error) => error_json(error),
+        }
     }
 }
 
