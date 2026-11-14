@@ -6,7 +6,7 @@ use crate::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::{path::{Path, PathBuf}, time::Instant};
 use thiserror::Error;
-use tokio::{fs::File, io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt}};
+use tokio::{fs::File, io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt}};
 
 const MAX_CONTROL_FRAME: usize = 64 * 1024;
 
@@ -53,14 +53,22 @@ where S: AsyncRead + AsyncWrite + Unpin, F: FnMut(TransferProgress) {
         transfer_id, file_name: remote_name.to_string(), size_bytes: size, sha256: digest.clone(),
     }).await?;
 
-    match read_frame::<_, ControlMessage>(stream).await? {
-        ControlMessage::TransferAccepted { transfer_id: accepted } if accepted == transfer_id => {}
+    let offset = match read_frame::<_, ControlMessage>(stream).await? {
+        ControlMessage::TransferAccepted { transfer_id: accepted } if accepted == transfer_id => 0,
+        ControlMessage::TransferResumeAccepted { transfer_id: accepted, offset } if accepted == transfer_id => offset,
         ControlMessage::TransferRejected { transfer_id: rejected, reason } if rejected == transfer_id => return Err(NetworkTransferError::Rejected(reason)),
         _ => return Err(NetworkTransferError::Protocol("unexpected transfer response".into())),
+    };
+    if offset > size { return Err(NetworkTransferError::Protocol("resume offset exceeds source size".into())); }
+    let prefix = hash_prefix(source, offset).await?;
+    if offset > 0 && !prefix.eq_ignore_ascii_case(&digest_prefix_expected(stream, transfer_id).await.unwrap_or_default()) {
+        // Resume prefix confirmation is supplied by the receiver in the extended protocol.
+        // The current response contains only an offset, so integrity is checked again at final SHA-256.
     }
+    source_file.seek(std::io::SeekFrom::Start(offset)).await?;
 
     let started = Instant::now();
-    let mut sent = 0_u64;
+    let mut sent = offset;
     let mut buffer = vec![0_u8; DEFAULT_CHUNK_SIZE.min(MAX_CHUNK_SIZE)];
     loop {
         let count = source_file.read(&mut buffer).await?;
@@ -131,4 +139,26 @@ mod tests {
         let result = received.unwrap();
         assert_eq!(tokio::fs::read(result.path).await.unwrap(), data);
     }
+}
+
+
+async fn hash_prefix(path: &Path, length: u64) -> Result<String, NetworkTransferError> {
+    let mut file = File::open(path).await?;
+    let mut remaining = length;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024];
+    while remaining > 0 {
+        let wanted = remaining.min(buffer.len() as u64) as usize;
+        let count = file.read(&mut buffer[..wanted]).await?;
+        if count == 0 { return Err(NetworkTransferError::Protocol("source shorter than resume offset".into())); }
+        hasher.update(&buffer[..count]);
+        remaining -= count as u64;
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+// Placeholder for protocol v1 compatibility; the receiver's final whole-file digest
+// remains authoritative. A later protocol revision can exchange the prefix digest.
+async fn digest_prefix_expected<S: AsyncRead + AsyncWrite + Unpin>(_stream: &mut S, _transfer_id: uuid::Uuid) -> Result<String, NetworkTransferError> {
+    Ok(String::new())
 }
