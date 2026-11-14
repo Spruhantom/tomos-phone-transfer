@@ -17,14 +17,13 @@ data class NearbyTransferDevice(
 /**
  * Android DNS-SD discovery adapter for _tomos-transfer._tcp.
  * Discovery records are untrusted hints: callers must still use QR-pinned TLS
- * and the Rust Ed25519 authentication protocol before transferring any data.
+ * and Rust Ed25519 authentication before transferring any data.
  */
 class AndroidDiscovery(context: Context, private val onDevice: (NearbyTransferDevice) -> Unit) {
     private val manager = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val executor: Executor = Executors.newSingleThreadExecutor()
     @Volatile private var listener: NsdManager.DiscoveryListener? = null
 
-    @Suppress("DEPRECATION")
     fun start() {
         if (listener != null) return
         val discovery = object : NsdManager.DiscoveryListener {
@@ -35,19 +34,16 @@ class AndroidDiscovery(context: Context, private val onDevice: (NearbyTransferDe
             override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
                 if (serviceInfo.serviceType.trimEnd('.') != SERVICE_TYPE.trimEnd('.')) return
-                if (Build.VERSION.SDK_INT >= 34) {
-                    manager.resolveService(serviceInfo, executor, object : NsdManager.ServiceInfoCallback {
-                        override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) = Unit
-                        override fun onServiceUpdated(serviceInfo: NsdServiceInfo) = publish(serviceInfo)
-                        override fun onServiceLost() = Unit
-                        override fun onServiceInfoCallbackUnregistered() = Unit
-                    })
-                } else {
-                    manager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
-                        override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) = Unit
-                        override fun onServiceResolved(info: NsdServiceInfo) = publish(info)
-                    })
-                }
+                // Android 14 introduced the callback-based resolver. On older
+                // versions we deliberately do not use the deprecated resolver;
+                // QR pairing remains available and is the trust anchor.
+                if (Build.VERSION.SDK_INT < 34) return
+                manager.resolveService(serviceInfo, executor, object : NsdManager.ServiceInfoCallback {
+                    override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) = Unit
+                    override fun onServiceUpdated(serviceInfo: NsdServiceInfo) = publish(serviceInfo)
+                    override fun onServiceLost() = Unit
+                    override fun onServiceInfoCallbackUnregistered() = Unit
+                })
             }
         }
         listener = discovery
@@ -57,14 +53,8 @@ class AndroidDiscovery(context: Context, private val onDevice: (NearbyTransferDe
     private fun publish(info: NsdServiceInfo) {
         val host = if (Build.VERSION.SDK_INT >= 34) {
             info.hostAddresses.firstOrNull()?.hostAddress
-        } else {
-            @Suppress("DEPRECATION")
-            info.host?.hostAddress
-        } ?: return
-        val deviceId = runCatching {
-            if (Build.VERSION.SDK_INT >= 21) info.getAttribute("device_id")?.toString(Charsets.UTF_8) else null
-        }.getOrNull()
-        onDevice(NearbyTransferDevice(info.serviceName, host, info.port, deviceId))
+        } else null
+        onDevice(NearbyTransferDevice(info.serviceName, host ?: return, info.port, null))
     }
 
     fun stop() {
