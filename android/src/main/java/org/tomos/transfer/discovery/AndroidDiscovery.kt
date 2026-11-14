@@ -36,9 +36,12 @@ class AndroidDiscovery(context: Context, private val onDevice: (NearbyTransferDe
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
                 if (serviceInfo.serviceType.trimEnd('.') != SERVICE_TYPE.trimEnd('.')) return
                 if (Build.VERSION.SDK_INT >= 34) {
-                    manager.resolveService(serviceInfo, executor) { resolved ->
-                        publish(resolved)
-                    }
+                    manager.resolveService(serviceInfo, executor, object : NsdManager.ServiceInfoCallback {
+                        override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) = Unit
+                        override fun onServiceUpdated(serviceInfo: NsdServiceInfo) = publish(serviceInfo)
+                        override fun onServiceLost() = Unit
+                        override fun onServiceInfoCallbackUnregistered() = Unit
+                    })
                 } else {
                     manager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                         override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) = Unit
