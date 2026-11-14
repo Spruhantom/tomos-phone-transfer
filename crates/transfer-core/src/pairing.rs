@@ -52,7 +52,13 @@ impl PairingInvitation {
         Ok(invitation)
     }
     pub fn trusted_certificate_der(&self) -> Result<Vec<u8>, PairingError> {
-        URL_SAFE_NO_PAD.decode(&self.tls_certificate).map_err(|e| PairingError::InvalidPayload(e.to_string()))
+        use sha2::{Digest, Sha256};
+        let der = URL_SAFE_NO_PAD.decode(&self.tls_certificate).map_err(|e| PairingError::InvalidPayload(e.to_string()))?;
+        let fingerprint = Sha256::digest(&der).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        if !fingerprint.eq_ignore_ascii_case(&self.tls_fingerprint) {
+            return Err(PairingError::InvalidPayload("TLS certificate fingerprint mismatch".into()));
+        }
+        Ok(der)
     }
     pub fn ensure_valid(&self) -> Result<(), PairingError> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| PairingError::InvalidPayload(e.to_string()))?.as_secs();
