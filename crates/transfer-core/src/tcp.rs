@@ -2,7 +2,7 @@ use crate::{
     auth::{authenticate_client, authenticate_server, AuthenticationError},
     identity::{LocalIdentity, PublicIdentity},
     network::{receive_one, send_file, NetworkTransferError},
-    pairing::{PairingError, PairingInvitation},
+    pairing::{OneTimePairingToken, PairingError, PairingInvitation},
     tls::{DeviceTlsIdentity, TlsSetupError},
     transfer::{TransferProgress, TransferResult},
 };
@@ -28,7 +28,7 @@ pub async fn accept_one<F, Fut, A, P>(
     listener: &TcpListener,
     acceptor: &TlsAcceptor,
     local_identity: &LocalIdentity,
-    expected_one_time_token: &str,
+    token_guard: &OneTimePairingToken,
     destination: &Path,
     approve_device: F,
     approve_file: A,
@@ -42,7 +42,7 @@ where
 {
     let (socket, _) = listener.accept().await?;
     let mut tls = acceptor.accept(socket).await.map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e))?;
-    let peer = authenticate_server(&mut tls, local_identity, expected_one_time_token, approve_device).await?;
+    let peer = authenticate_server(&mut tls, local_identity, token_guard, approve_device).await?;
     let result = receive_one(&mut tls, destination, approve_file, on_progress).await?;
     Ok((peer, result))
 }
