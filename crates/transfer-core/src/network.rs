@@ -40,30 +40,32 @@ async fn read_frame<R: AsyncRead + Unpin, T: DeserializeOwned>(reader: &mut R) -
 
 /// Sends a file over an already authenticated TLS stream. The caller must perform
 /// device identity verification and obtain user approval before invoking this.
-pub async fn send_file<S, F>(stream: &mut S, source: &Path, remote_name: &str, mut on_progress: F) -> Result<(), NetworkTransferError>
+pub async fn send_file<S, F>(stream: &mut S, source: &Path, remote_name: &str, on_progress: F) -> Result<(), NetworkTransferError>
+where S: AsyncRead + AsyncWrite + Unpin, F: FnMut(TransferProgress) {
+    send_file_with_id(stream, source, remote_name, uuid::Uuid::new_v4(), on_progress).await
+}
+
+pub async fn send_file_with_id<S, F>(stream: &mut S, source: &Path, remote_name: &str, transfer_id: uuid::Uuid, mut on_progress: F) -> Result<(), NetworkTransferError>
 where S: AsyncRead + AsyncWrite + Unpin, F: FnMut(TransferProgress) {
     if !validate_file_name(remote_name) { return Err(NetworkTransferError::Protocol("unsafe destination filename".into())); }
     let mut source_file = File::open(source).await?;
     let size = source_file.metadata().await?.len();
     let mut hash_file = File::open(source).await?;
     let digest = to_hex(&sha256_reader(&mut hash_file).await?);
-    let transfer_id = uuid::Uuid::new_v4();
-
     write_frame(stream, &ControlMessage::TransferOffer {
         transfer_id, file_name: remote_name.to_string(), size_bytes: size, sha256: digest.clone(),
     }).await?;
 
-    let offset = match read_frame::<_, ControlMessage>(stream).await? {
-        ControlMessage::TransferAccepted { transfer_id: accepted } if accepted == transfer_id => 0,
-        ControlMessage::TransferResumeAccepted { transfer_id: accepted, offset } if accepted == transfer_id => offset,
+    let (offset, expected_prefix) = match read_frame::<_, ControlMessage>(stream).await? {
+        ControlMessage::TransferAccepted { transfer_id: accepted } if accepted == transfer_id => (0, String::new()),
+        ControlMessage::TransferResumeAccepted { transfer_id: accepted, offset, prefix_sha256 } if accepted == transfer_id => (offset, prefix_sha256),
         ControlMessage::TransferRejected { transfer_id: rejected, reason } if rejected == transfer_id => return Err(NetworkTransferError::Rejected(reason)),
         _ => return Err(NetworkTransferError::Protocol("unexpected transfer response".into())),
     };
     if offset > size { return Err(NetworkTransferError::Protocol("resume offset exceeds source size".into())); }
     let prefix = hash_prefix(source, offset).await?;
-    if offset > 0 && !prefix.eq_ignore_ascii_case(&digest_prefix_expected(stream, transfer_id).await.unwrap_or_default()) {
-        // Resume prefix confirmation is supplied by the receiver in the extended protocol.
-        // The current response contains only an offset, so integrity is checked again at final SHA-256.
+    if offset > 0 && !prefix.eq_ignore_ascii_case(&expected_prefix) {
+        return Err(NetworkTransferError::Protocol("resume prefix checksum mismatch".into()));
     }
     source_file.seek(std::io::SeekFrom::Start(offset)).await?;
 
@@ -157,8 +159,3 @@ async fn hash_prefix(path: &Path, length: u64) -> Result<String, NetworkTransfer
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-// Placeholder for protocol v1 compatibility; the receiver's final whole-file digest
-// remains authoritative. A later protocol revision can exchange the prefix digest.
-async fn digest_prefix_expected<S: AsyncRead + AsyncWrite + Unpin>(_stream: &mut S, _transfer_id: uuid::Uuid) -> Result<String, NetworkTransferError> {
-    Ok(String::new())
-}
