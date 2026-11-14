@@ -1,4 +1,4 @@
-use rcgen::generate_simple_self_signed;
+use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
 use rustls::{pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName}, ClientConfig, RootCertStore, ServerConfig};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -11,8 +11,8 @@ pub enum TlsSetupError {
     #[error("invalid trusted certificate: {0}")] Trust(String),
 }
 
-/// A device TLS identity. The certificate DER is shared through the QR invitation;
-/// the private key must be stored securely and never exported.
+/// TLS certificate material. Keep private_key_der in platform secure storage.
+/// The public certificate is distributed in the short-lived QR invitation.
 pub struct DeviceTlsIdentity {
     pub certificate_der: Vec<u8>,
     private_key_der: Vec<u8>,
@@ -21,13 +21,24 @@ pub struct DeviceTlsIdentity {
 
 impl DeviceTlsIdentity {
     pub fn generate() -> Result<Self, TlsSetupError> {
-        let certified = generate_simple_self_signed(vec!["tomos-transfer.local".to_string()])
+        let mut params = CertificateParams::new(vec!["tomos-transfer.local".to_string()])
             .map_err(|e| TlsSetupError::Certificate(e.to_string()))?;
-        let certificate_der = certified.cert.der().to_vec();
-        let private_key_der = certified.key_pair.serialize_der();
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let key_pair = KeyPair::generate().map_err(|e| TlsSetupError::Certificate(e.to_string()))?;
+        let certificate = params.self_signed(&key_pair).map_err(|e| TlsSetupError::Certificate(e.to_string()))?;
+        let certificate_der = certificate.der().to_vec();
+        let private_key_der = key_pair.serialize_der();
         let fingerprint = hex(&Sha256::digest(&certificate_der));
         Ok(Self { certificate_der, private_key_der, fingerprint })
     }
+
+    pub fn from_der(certificate_der: Vec<u8>, private_key_der: Vec<u8>) -> Self {
+        let fingerprint = hex(&Sha256::digest(&certificate_der));
+        Self { certificate_der, private_key_der, fingerprint }
+    }
+
+    pub fn private_key_der(&self) -> &[u8] { &self.private_key_der }
+
     pub fn server_acceptor(&self) -> Result<TlsAcceptor, TlsSetupError> {
         let cert = CertificateDer::from(self.certificate_der.clone());
         let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(self.private_key_der.clone()));
@@ -37,8 +48,8 @@ impl DeviceTlsIdentity {
             .map_err(|e| TlsSetupError::Certificate(e.to_string()))?;
         Ok(TlsAcceptor::from(Arc::new(config)))
     }
-    /// Pins the server certificate obtained from the QR invitation. This authenticates
-    /// the TLS endpoint; the Ed25519 challenge proof separately authenticates the peer.
+
+    /// Pins the inviter's certificate from the scanned QR payload.
     pub fn pinned_connector(trusted_certificate: Vec<u8>) -> Result<TlsConnector, TlsSetupError> {
         let mut roots = RootCertStore::empty();
         roots.add(CertificateDer::from(trusted_certificate))
@@ -48,6 +59,7 @@ impl DeviceTlsIdentity {
             .with_no_client_auth();
         Ok(TlsConnector::from(Arc::new(config)))
     }
+
     pub fn connect_name() -> Result<ServerName<'static>, TlsSetupError> {
         ServerName::try_from("tomos-transfer.local".to_string())
             .map_err(|e| TlsSetupError::Trust(e.to_string()))
