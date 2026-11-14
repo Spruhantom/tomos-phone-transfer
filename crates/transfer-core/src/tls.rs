@@ -19,8 +19,15 @@ pub struct DeviceTlsIdentity {
     pub fingerprint: String,
 }
 
+fn ensure_crypto_provider() {
+    // rcgen and tokio-rustls can enable different rustls providers transitively.
+    // Select ring explicitly so rustls never has to guess at runtime.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 impl DeviceTlsIdentity {
     pub fn generate() -> Result<Self, TlsSetupError> {
+        ensure_crypto_provider();
         let mut params = CertificateParams::new(vec!["tomos-transfer.local".to_string()])
             .map_err(|e| TlsSetupError::Certificate(e.to_string()))?;
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -40,6 +47,7 @@ impl DeviceTlsIdentity {
     pub fn private_key_der(&self) -> &[u8] { &self.private_key_der }
 
     pub fn server_acceptor(&self) -> Result<TlsAcceptor, TlsSetupError> {
+        ensure_crypto_provider();
         let cert = CertificateDer::from(self.certificate_der.clone());
         let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(self.private_key_der.clone()));
         let config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
@@ -51,6 +59,7 @@ impl DeviceTlsIdentity {
 
     /// Pins the inviter's certificate from the scanned QR payload.
     pub fn pinned_connector(trusted_certificate: Vec<u8>) -> Result<TlsConnector, TlsSetupError> {
+        ensure_crypto_provider();
         let mut roots = RootCertStore::empty();
         roots.add(CertificateDer::from(trusted_certificate))
             .map_err(|e| TlsSetupError::Trust(e.to_string()))?;
