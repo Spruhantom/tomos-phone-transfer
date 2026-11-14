@@ -262,4 +262,16 @@ mod tests {
             serde_json::from_str(&restore_identity_json(Uuid::new_v4().to_string(), vec![1; 31])).unwrap();
         assert_eq!(result["ok"], false);
     }
+
+    #[test]
+    fn opaque_identity_handle_keeps_device_identity_and_signs_challenges() {
+        let id = Uuid::new_v4();
+        let handle = TransferIdentity::restore(id.to_string(), vec![4; 32]).unwrap();
+        let public: crate::identity::PublicIdentity =
+            serde_json::from_str(&handle.public_identity_json()).unwrap();
+        assert_eq!(public.device_id, id);
+        let proof: crate::identity::IdentityProof =
+            serde_json::from_str(&handle.prove_challenge_json(vec![6; 32])).unwrap();
+        assert!(crate::identity::verify_proof(&public, &proof, &[6; 32]));
+    }
 }
