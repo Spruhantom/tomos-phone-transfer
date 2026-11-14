@@ -14,6 +14,8 @@ pub struct PairingInvitation {
     pub port: u16,
     /// SHA-256 fingerprint of the TLS certificate, encoded as lowercase hex.
     pub tls_fingerprint: String,
+    /// DER certificate, included so the scanner can pin this TLS endpoint.
+    pub tls_certificate: String,
     /// One-time random secret. Consume once and expire quickly.
     pub token: String,
     pub expires_at: u64,
@@ -28,12 +30,12 @@ pub enum PairingError {
 }
 
 impl PairingInvitation {
-    pub fn create(identity: PublicIdentity, host: String, port: u16, tls_fingerprint: String, lifetime_seconds: u64) -> Result<Self, PairingError> {
+    pub fn create(identity: PublicIdentity, host: String, port: u16, tls_fingerprint: String, tls_certificate_der: Vec<u8>, lifetime_seconds: u64) -> Result<Self, PairingError> {
         if lifetime_seconds == 0 || lifetime_seconds > 600 { return Err(PairingError::InvalidLifetime); }
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| PairingError::InvalidPayload(e.to_string()))?.as_secs();
         let mut token = [0_u8; 32];
         OsRng.fill_bytes(&mut token);
-        Ok(Self { version: 1, identity, host, port, tls_fingerprint, token: URL_SAFE_NO_PAD.encode(token), expires_at: now + lifetime_seconds })
+        Ok(Self { version: 1, identity, host, port, tls_fingerprint, tls_certificate: URL_SAFE_NO_PAD.encode(tls_certificate_der), token: URL_SAFE_NO_PAD.encode(token), expires_at: now + lifetime_seconds })
     }
     pub fn to_qr_payload(&self) -> Result<String, PairingError> {
         let json = serde_json::to_vec(self).map_err(|e| PairingError::InvalidPayload(e.to_string()))?;
@@ -48,6 +50,9 @@ impl PairingInvitation {
         let invitation: Self = serde_json::from_slice(&bytes).map_err(|e| PairingError::InvalidPayload(e.to_string()))?;
         invitation.ensure_valid()?;
         Ok(invitation)
+    }
+    pub fn trusted_certificate_der(&self) -> Result<Vec<u8>, PairingError> {
+        URL_SAFE_NO_PAD.decode(&self.tls_certificate).map_err(|e| PairingError::InvalidPayload(e.to_string()))
     }
     pub fn ensure_valid(&self) -> Result<(), PairingError> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| PairingError::InvalidPayload(e.to_string()))?.as_secs();
