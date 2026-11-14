@@ -38,7 +38,7 @@ class AndroidDiscovery(context: Context, private val onDevice: (NearbyTransferDe
                 // versions we deliberately do not use the deprecated resolver;
                 // QR pairing remains available and is the trust anchor.
                 if (Build.VERSION.SDK_INT < 34) return
-                manager.resolveService(serviceInfo, executor, object : NsdManager.ServiceInfoCallback {
+                manager.registerServiceInfoCallback(serviceInfo, executor, object : NsdManager.ServiceInfoCallback {
                     override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) = Unit
                     override fun onServiceUpdated(serviceInfo: NsdServiceInfo) = publish(serviceInfo)
                     override fun onServiceLost() = Unit
