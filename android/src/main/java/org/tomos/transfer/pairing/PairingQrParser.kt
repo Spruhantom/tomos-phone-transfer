@@ -4,6 +4,7 @@ import android.util.Base64
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.UUID
 
 /**
  * Parses and validates the public QR invitation envelope before the Rust bridge
@@ -38,8 +39,12 @@ object PairingQrParser {
 
         val identity = json.getJSONObject("identity")
         val deviceId = identity.getString("device_id")
-        val publicKey = identity.getString("public_key")
-        require(publicKey.isNotBlank()) { "Missing device identity key" }
+        UUID.fromString(deviceId)
+        val publicKey = identity.getJSONArray("public_key")
+        require(publicKey.length() == 32) { "Invalid device identity key" }
+        for (index in 0 until publicKey.length()) {
+            require(publicKey.getInt(index) in 0..255) { "Invalid device identity key byte" }
+        }
 
         val host = json.getString("host")
         require(host.isNotBlank() && host.length <= 253 && !host.contains('/')) { "Invalid device address" }
