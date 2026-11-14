@@ -11,6 +11,7 @@ pub mod pairing;
 pub mod protocol;
 pub mod resume;
 pub mod tls;
+pub mod tcp;
 pub mod transfer;
 pub mod verification;
 
