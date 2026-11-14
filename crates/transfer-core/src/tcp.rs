@@ -1,7 +1,7 @@
 use crate::{
     auth::{authenticate_client, authenticate_server, AuthenticationError},
     identity::{LocalIdentity, PublicIdentity},
-    network::{receive_one, send_file, NetworkTransferError},
+    network::{receive_one, receive_one_resumable, send_file, send_file_with_id, NetworkTransferError},
     pairing::{OneTimePairingToken, PairingError, PairingInvitation},
     tls::{DeviceTlsIdentity, TlsSetupError},
     transfer::{TransferProgress, TransferResult},
@@ -110,4 +110,57 @@ mod tests {
         let (_, result) = received.unwrap();
         assert_eq!(tokio::fs::read(result.path).await.unwrap(), data);
     }
+}
+
+
+/// Resumable counterpart to accept_one. Keep state_dir on the same filesystem as
+/// destination so the verified partial file can be atomically linked into place.
+pub async fn accept_one_resumable<F, Fut, A, P>(
+    listener: &TcpListener,
+    acceptor: &TlsAcceptor,
+    local_identity: &LocalIdentity,
+    token_guard: &OneTimePairingToken,
+    destination: &Path,
+    state_dir: &Path,
+    approve_device: F,
+    approve_file: A,
+    on_progress: P,
+) -> Result<(PublicIdentity, TransferResult), TcpTransferError>
+where
+    F: FnOnce(&PublicIdentity) -> Fut,
+    Fut: Future<Output = bool>,
+    A: FnOnce(&str, u64, &str) -> bool,
+    P: FnMut(TransferProgress),
+{
+    let (socket, _) = listener.accept().await?;
+    let mut tls = acceptor.accept(socket).await
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e))?;
+    let peer = authenticate_server(&mut tls, local_identity, token_guard, approve_device).await?;
+    let result = receive_one_resumable(&mut tls, destination, state_dir, approve_file, on_progress).await?;
+    Ok((peer, result))
+}
+
+/// Stable transfer ID must be reused when retrying after a disconnect so the
+/// receiver can locate and validate the matching resume manifest.
+pub async fn connect_and_send_with_id<P>(
+    invitation: &PairingInvitation,
+    local_identity: &LocalIdentity,
+    source: &Path,
+    remote_name: &str,
+    transfer_id: uuid::Uuid,
+    on_progress: P,
+) -> Result<(), TcpTransferError>
+where P: FnMut(TransferProgress) {
+    invitation.ensure_valid()?;
+    let certificate = invitation.trusted_certificate_der()?;
+    let connector = DeviceTlsIdentity::pinned_connector(certificate)?;
+    let address: SocketAddr = format!("{}:{}", invitation.host, invitation.port).parse()
+        .map_err(|_| TcpTransferError::InvalidAddress)?;
+    let socket = TcpStream::connect(address).await?;
+    let server_name = DeviceTlsIdentity::connect_name()?;
+    let mut tls = connector.connect(server_name, socket).await
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e))?;
+    authenticate_client(&mut tls, local_identity, &invitation.identity, &invitation.token).await?;
+    send_file_with_id(&mut tls, source, remote_name, transfer_id, on_progress).await?;
+    Ok(())
 }
