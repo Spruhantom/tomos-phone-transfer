@@ -24,12 +24,10 @@ impl Discovery {
         self.daemon.register(service).map_err(|e| DiscoveryError::Mdns(e.to_string()))
     }
 
-    /// Returns the browse receiver; callers should process events off the UI thread.
-    pub fn browse(&self) -> Result<mdns_sd::Receiver<ServiceEvent>, DiscoveryError> {
-        self.daemon.browse(SERVICE_TYPE).map_err(|e| DiscoveryError::Mdns(e.to_string()))
+    /// Starts browsing. The returned callback waits for the next event without
+    /// exposing the discovery library's channel type to platform front ends.
+    pub fn browse(&self) -> Result<impl FnMut(Duration) -> Option<ServiceEvent>, DiscoveryError> {
+        let receiver = self.daemon.browse(SERVICE_TYPE).map_err(|e| DiscoveryError::Mdns(e.to_string()))?;
+        Ok(move |timeout| receiver.recv_timeout(timeout).ok())
     }
-}
-
-pub fn wait_for_event(receiver: &mdns_sd::Receiver<ServiceEvent>, timeout: Duration) -> Option<ServiceEvent> {
-    receiver.recv_timeout(timeout).ok()
 }
