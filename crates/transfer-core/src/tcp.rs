@@ -9,7 +9,7 @@ use crate::{
 use std::{future::Future, net::SocketAddr, path::Path};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_rustls::{TlsAcceptor, TlsConnector};
+use tokio_rustls::TlsAcceptor;
 
 #[derive(Debug, Error)]
 pub enum TcpTransferError {
