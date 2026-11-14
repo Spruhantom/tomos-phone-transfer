@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
-    io::{self, Read, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
