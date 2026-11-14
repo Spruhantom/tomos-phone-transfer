@@ -6,7 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 description = "Shared device-to-device transfer engine for TomOS Transfer"
 
-[lib]\ncrate-type = ["rlib", "cdylib"]\n\n[dependencies]
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
 base64.workspace = true
 ed25519-dalek.workspace = true
 mdns-sd.workspace = true
@@ -20,7 +23,8 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
-uuid.workspace = true\nuniffi.workspace = true
+uuid.workspace = true
+uniffi.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
