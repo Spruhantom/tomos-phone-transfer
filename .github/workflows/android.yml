@@ -39,7 +39,6 @@ jobs:
       - name: Install native build tools
         run: |
           cargo install cargo-ndk --locked
-          cargo install uniffi-bindgen-cli --version 0.29.4 --locked
       - name: Build Rust libraries and generate Kotlin bindings
         run: bash scripts/build-android-native.sh
       - name: Assemble debug application
