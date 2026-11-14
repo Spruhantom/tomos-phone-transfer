@@ -68,3 +68,27 @@ impl PairingInvitation {
         Ok(())
     }
 }
+
+/// In-memory single-use token guard. Create a fresh guard for each QR invitation;
+/// consuming it prevents replaying the same QR pairing secret for another session.
+#[derive(Default)]
+pub struct OneTimePairingToken(std::sync::Mutex<Option<String>>);
+
+impl OneTimePairingToken {
+    pub fn new(token: String) -> Self { Self(std::sync::Mutex::new(Some(token))) }
+    pub fn consume(&self, presented: &str) -> bool {
+        let Ok(mut stored) = self.0.lock() else { return false; };
+        match stored.take() {
+            Some(expected) => constant_time_equal(expected.as_bytes(), presented.as_bytes()),
+            None => false,
+        }
+    }
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    use std::hint::black_box;
+    if left.len() != right.len() { return false; }
+    let mut difference = 0_u8;
+    for (a, b) in left.iter().zip(right) { difference |= a ^ b; }
+    black_box(difference) == 0
+}
