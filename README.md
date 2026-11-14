@@ -78,3 +78,23 @@ GitHub Actions validates the Rust workspace and builds the Android debug applica
 ## License
 
 License to be selected before the first public release.
+
+
+## Native engine bridge (Phase 3)
+
+Android and Linux are being connected to the same Rust transfer engine through UniFFI. The Rust crate is built as both an `rlib` and `cdylib`; the platform application owns secure persistence and passes the Ed25519 seed to an opaque Rust identity handle only when restoring the session.
+
+The first exported operations cover identity restoration, public identity retrieval, challenge proofs, pairing QR payload generation, and scanned invitation validation. The QR certificate fingerprint is checked in Rust. A valid invitation is not by itself an authenticated session: the TLS 1.3 certificate pin and mutual Ed25519 challenge-response handshake must still complete before a transfer.
+
+### Build Android native libraries and Kotlin bindings
+
+Install Rust, Android SDK/NDK, `cargo-ndk`, and `uniffi-bindgen-cli` 0.29.4, then run:
+
+```bash
+bash scripts/build-android-native.sh
+gradle :android:assembleDebug
+```
+
+The script builds Android ABI libraries for arm64-v8a, armeabi-v7a, and x86_64 under `android/src/main/jniLibs`, then generates Kotlin bindings into the Android source tree.
+
+**Integration status:** the exported native identity and pairing surface is under development. The Android UI is not yet wired to the native listener, authenticated TLS transfer session, receive approval, progress callbacks, or resume controls. Linux secure-storage and UI adapters are also outstanding. Do not treat the current Android UI as a working file-transfer client yet.
