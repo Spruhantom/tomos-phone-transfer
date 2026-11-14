@@ -20,13 +20,15 @@ Implemented on `phase1/core-transfer-engine`:
 ### Phase 2 — Android foundation
 
 In progress on `phase2/android-foundation`:
-- Native Kotlin/Jetpack Compose application module.
-- Android Keystore AES-256-GCM wrapping key for the Ed25519 identity seed.
+- Native Kotlin/Jetpack Compose application.
+- Android Keystore AES-256-GCM protection for the Ed25519 identity seed.
 - Encrypted identity record in app-private, no-backup storage.
-- Fail-closed handling when an existing identity cannot be decrypted.
+- QR scanning and local validation of pairing invitation envelopes, including certificate fingerprint.
+- Android NSD browsing for nearby `_tomos-transfer._tcp` devices.
+- System document picker for selecting files.
 - Android Gradle build workflow.
 
-The Android UI is currently a foundation screen. The Rust JNI/UniFFI bridge, QR scanning, file selection, mDNS browsing, listener lifecycle and real transfer controls are not connected yet.
+The Android UI now supports selecting a file, scanning a pairing QR, and discovering LAN advertisements. These are interaction-layer features only: the native Rust bridge, authenticated socket connection, actual send/receive operations, and progress/resume controls are not connected yet.
 
 ## Security model
 
@@ -37,6 +39,8 @@ The Android UI is currently a foundation screen. The Rust JNI/UniFFI bridge, QR 
 5. Incoming file offers require separate user approval.
 6. File names are validated, existing files are not overwritten, and completed files are SHA-256 verified.
 7. Android private identity seeds are encrypted with an Android Keystore-held AES key. Linux key storage will use Secret Service.
+
+QR parsing in Android is not peer authentication. The Rust core remains responsible for TLS 1.3 certificate pinning, mutual identity proof, token consumption and transfer approval.
 
 ## Resumable transfers
 
@@ -63,7 +67,9 @@ GitHub Actions validates the Rust workspace and builds the Android debug applica
 
 ## Current limitations
 
-- The Android app foundation is not yet connected to the Rust engine.
+- JNI/UniFFI bridge to the Rust engine is not yet implemented.
+- QR scanning, discovery and file selection do not yet initiate transfers.
+- Android listener lifecycle, incoming approvals, progress and resume UI remain to do.
 - Linux UI and Secret Service adapter are not yet implemented.
 - mDNS is LAN-only; there is no internet discovery, NAT traversal or relay.
 - USB transport is planned separately.
