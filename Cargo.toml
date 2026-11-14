@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/transfer-core"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.78"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1.40", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync"] }
+uuid = { version = "1.10", features = ["serde", "v4"] }
