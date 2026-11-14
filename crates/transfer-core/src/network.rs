@@ -4,6 +4,7 @@ use crate::{
     verification::{sha256_reader, to_hex},
 };
 use serde::{de::DeserializeOwned, Serialize};
+use sha2::Digest;
 use std::{path::{Path, PathBuf}, time::Instant};
 use thiserror::Error;
 use tokio::{fs::File, io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt}};
@@ -243,4 +244,35 @@ where
     let result = TransferResult { path: result_path, bytes_received: size_bytes, sha256: sha256.clone() };
     write_frame(stream, &ControlMessage::TransferComplete { transfer_id, sha256 }).await?;
     Ok(result)
+}
+
+
+#[cfg(test)]
+mod resumable_tests {
+    use super::*;
+    use tokio::io::duplex;
+
+    #[tokio::test]
+    async fn resumable_transfer_completes_and_cleans_checkpoint() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let destination_dir = tempfile::tempdir().unwrap();
+        let state_dir = destination_dir.path();
+        let source = source_dir.path().join("large.dat");
+        let data = vec![17_u8; 700_000];
+        tokio::fs::write(&source, &data).await.unwrap();
+        let transfer_id = uuid::Uuid::new_v4();
+        let (mut sender, mut receiver) = duplex(96 * 1024);
+        let send = async {
+            send_file_with_id(&mut sender, &source, "large.dat", transfer_id, |_| {}).await
+        };
+        let receive = async {
+            receive_one_resumable(&mut receiver, destination_dir.path(), state_dir,
+                |name, size, _| name == "large.dat" && size == data.len() as u64, |_| {}).await
+        };
+        let (sent, received) = tokio::join!(send, receive);
+        sent.unwrap();
+        let result = received.unwrap();
+        assert_eq!(tokio::fs::read(result.path).await.unwrap(), data);
+        assert!(!tokio::fs::try_exists(state_dir.join(format!("{}.tomos-transfer.json", transfer_id))).await.unwrap());
+    }
 }
