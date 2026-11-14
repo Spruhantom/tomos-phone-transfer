@@ -11,7 +11,8 @@ use crate::{
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-use std::sync::{Arc, Mutex};
+use std::{net::TcpListener as StdTcpListener, path::Path, sync::{Arc, Mutex}};
+use tokio_rustls::TlsAcceptor;
 
 fn error_json(message: impl std::fmt::Display) -> String {
     json!({ "ok": false, "error": message.to_string() }).to_string()
@@ -158,6 +159,109 @@ impl TlsIdentityHandle {
     }
 }
 
+
+/// User approval and progress callbacks for a receiving session. Implementations
+/// must present the peer/file details to the user and return explicit approval.
+#[uniffi::export(callback_interface)]
+pub trait TransferCallbacks: Send + Sync {
+    fn approve_peer(&self, device_id: String, public_key: Vec<u8>) -> bool;
+    fn approve_file(&self, file_name: String, size_bytes: u64, sha256: String) -> bool;
+    fn on_progress(&self, bytes_received: u64, total_bytes: u64, bytes_per_second: u64);
+}
+
+/// A one-shot receiver created before its QR is shown. The bound socket and
+/// one-time invitation token stay together so the QR cannot be detached from
+/// the listener that will authenticate it.
+#[derive(uniffi::Object)]
+pub struct TransferReceiver {
+    listener: Mutex<Option<StdTcpListener>>,
+    identity: Mutex<LocalIdentity>,
+    acceptor: TlsAcceptor,
+    invitation: PairingInvitation,
+}
+
+#[uniffi::export]
+impl TransferReceiver {
+    pub fn pairing_payload(&self) -> String {
+        self.invitation.to_qr_payload().unwrap_or_default()
+    }
+
+    pub fn port(&self) -> u16 {
+        self.invitation.port
+    }
+
+    /// Wait for one sender. This is a blocking call and must run on a worker
+    /// thread in Android/Linux. A disconnect leaves the checkpoint manifest in
+    /// state_dir; create a fresh receiver/QR and retry with the same transfer ID.
+    pub fn receive_once(
+        &self,
+        destination_dir: String,
+        state_dir: String,
+        callbacks: Arc<dyn TransferCallbacks>,
+    ) -> String {
+        let listener = match self.listener.lock() {
+            Ok(mut listener) => match listener.take() {
+                Some(listener) => listener,
+                None => return error_json("receiver has already been used"),
+            },
+            Err(_) => return error_json("receiver listener lock poisoned"),
+        };
+        let identity = match self.identity.lock() {
+            Ok(identity) => identity,
+            Err(_) => return error_json("receiver identity lock poisoned"),
+        };
+        let token_guard = OneTimePairingToken::from_invitation(&self.invitation);
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => return error_json(error),
+        };
+        let result = runtime.block_on(async {
+            let listener = tokio::net::TcpListener::from_std(listener)?;
+            accept_one_resumable(
+                &listener,
+                &self.acceptor,
+                &identity,
+                &token_guard,
+                Path::new(&destination_dir),
+                Path::new(&state_dir),
+                |peer| {
+                    let callbacks = Arc::clone(&callbacks);
+                    let peer = peer.clone();
+                    async move {
+                        callbacks.approve_peer(
+                            peer.device_id.to_string(),
+                            peer.public_key.to_vec(),
+                        )
+                    }
+                },
+                |name, size, checksum| {
+                    callbacks.approve_file(name.to_owned(), size, checksum.to_owned())
+                },
+                |progress| {
+                    callbacks.on_progress(
+                        progress.bytes_received,
+                        progress.total_bytes,
+                        progress.bytes_per_second,
+                    );
+                },
+            ).await
+        });
+        match result {
+            Ok((peer, transfer)) => json!({
+                "ok": true,
+                "peer_device_id": peer.device_id,
+                "path": transfer.path,
+                "bytes_received": transfer.bytes_received,
+                "sha256": transfer.sha256
+            }).to_string(),
+            Err(error) => error_json(error),
+        }
+    }
+}
+
 /// Opaque, long-lived native identity handle. Platform code keeps this handle
 /// for the active session; the secret key is never returned through UniFFI.
 #[derive(uniffi::Object)]
@@ -237,6 +341,42 @@ impl TransferIdentity {
             Ok(payload) => json!({ "ok": true, "payload": payload }).to_string(),
             Err(error) => error_json(error),
         }
+    }
+
+
+    /// Bind a one-shot receive socket and create its QR invitation before the
+    /// UI displays the QR. bind_address should normally be "0.0.0.0:0".
+    pub fn create_receiver(
+        &self,
+        advertised_host: String,
+        bind_address: String,
+        tls_identity: Arc<TlsIdentityHandle>,
+        lifetime_seconds: u64,
+    ) -> Option<Arc<TransferReceiver>> {
+        if advertised_host.trim().is_empty() {
+            return None;
+        }
+        let listener = StdTcpListener::bind(&bind_address).ok()?;
+        listener.set_nonblocking(true).ok()?;
+        let port = listener.local_addr().ok()?.port();
+        let identity = self.identity.lock().ok()?;
+        let identity_copy = LocalIdentity::from_secret(identity.device_id, identity.secret_bytes());
+        let tls = tls_identity.identity.lock().ok()?;
+        let acceptor = tls.server_acceptor().ok()?;
+        let invitation = PairingInvitation::create(
+            identity.public_identity(),
+            advertised_host,
+            port,
+            tls.fingerprint.clone(),
+            tls.certificate_der.clone(),
+            lifetime_seconds,
+        ).ok()?;
+        Some(Arc::new(TransferReceiver {
+            listener: Mutex::new(Some(listener)),
+            identity: Mutex::new(identity_copy),
+            acceptor,
+            invitation,
+        }))
     }
 
     /// Send one file through the existing TLS 1.3 + QR pinning + mutual
