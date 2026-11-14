@@ -23,7 +23,7 @@ cargo ndk \
 BINDGEN_LIB="android/src/main/jniLibs/arm64-v8a/libtomos_transfer_core.so"
 test -f "$BINDGEN_LIB"
 mkdir -p android/src/main/java
-uniffi-bindgen generate \
+cargo run --release -p uniffi-bindgen -- generate \
   --library "$BINDGEN_LIB" \
   --language kotlin \
   --out-dir android/src/main/java
