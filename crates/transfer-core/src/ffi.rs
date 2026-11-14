@@ -6,6 +6,7 @@
 use crate::{
     identity::LocalIdentity,
     pairing::PairingInvitation,
+    tls::DeviceTlsIdentity,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -112,6 +113,50 @@ pub fn validate_pairing_payload(payload: String) -> String {
     }
 }
 
+
+
+/// TLS leaf identity used by the receiving device. The private key must be
+/// persisted by the platform in secure storage and must never be logged or
+/// placed in the pairing QR payload.
+#[derive(uniffi::Object)]
+pub struct TlsIdentityHandle {
+    identity: Mutex<DeviceTlsIdentity>,
+}
+
+#[uniffi::export]
+impl TlsIdentityHandle {
+    #[uniffi::constructor]
+    pub fn generate() -> Option<Arc<Self>> {
+        let identity = DeviceTlsIdentity::generate().ok()?;
+        Some(Arc::new(Self { identity: Mutex::new(identity) }))
+    }
+
+    /// Restore certificate material from platform secure storage and validate
+    /// that the certificate and private key can form a TLS server identity.
+    #[uniffi::constructor]
+    pub fn restore(certificate_der: Vec<u8>, private_key_der: Vec<u8>) -> Option<Arc<Self>> {
+        if certificate_der.is_empty() || private_key_der.is_empty() {
+            return None;
+        }
+        let identity = DeviceTlsIdentity::from_der(certificate_der, private_key_der);
+        identity.server_acceptor().ok()?;
+        Some(Arc::new(Self { identity: Mutex::new(identity) }))
+    }
+
+    pub fn certificate_der(&self) -> Vec<u8> {
+        self.identity.lock().map(|identity| identity.certificate_der.clone()).unwrap_or_default()
+    }
+
+    pub fn fingerprint(&self) -> String {
+        self.identity.lock().map(|identity| identity.fingerprint.clone()).unwrap_or_default()
+    }
+
+    /// Export only so the platform can encrypt it with Android Keystore or
+    /// store it in Linux Secret Service. Never persist this in ordinary files.
+    pub fn private_key_der_for_secure_storage(&self) -> Vec<u8> {
+        self.identity.lock().map(|identity| identity.private_key_der().to_vec()).unwrap_or_default()
+    }
+}
 
 /// Opaque, long-lived native identity handle. Platform code keeps this handle
 /// for the active session; the secret key is never returned through UniFFI.
