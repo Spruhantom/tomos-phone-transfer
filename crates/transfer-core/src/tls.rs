@@ -1,4 +1,4 @@
-use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
+use rcgen::{CertificateParams, IsCa, KeyPair};
 use rustls::{pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName}, ClientConfig, RootCertStore, ServerConfig};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -30,7 +30,9 @@ impl DeviceTlsIdentity {
         ensure_crypto_provider();
         let mut params = CertificateParams::new(vec!["tomos-transfer.local".to_string()])
             .map_err(|e| TlsSetupError::Certificate(e.to_string()))?;
-        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        // This certificate is the device's TLS leaf certificate, not a CA.
+        // The QR invitation distributes it as the explicitly trusted certificate.
+        params.is_ca = IsCa::NoCa;
         let key_pair = KeyPair::generate().map_err(|e| TlsSetupError::Certificate(e.to_string()))?;
         let certificate = params.self_signed(&key_pair).map_err(|e| TlsSetupError::Certificate(e.to_string()))?;
         let certificate_der = certificate.der().to_vec();
