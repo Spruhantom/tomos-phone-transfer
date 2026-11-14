@@ -193,6 +193,52 @@ impl TransferIdentity {
             Err(error) => error_json(error),
         }
     }
+
+    /// Send one file through the existing TLS 1.3 + QR pinning + mutual
+    /// Ed25519 authentication pipeline. Run this blocking call on a worker
+    /// thread in platform applications. Reuse transfer_id when retrying.
+    pub fn send_file(
+        &self,
+        invitation_payload: String,
+        source_path: String,
+        remote_name: String,
+        transfer_id: String,
+    ) -> String {
+        let invitation = match PairingInvitation::parse_qr_payload(&invitation_payload) {
+            Ok(value) => value,
+            Err(error) => return error_json(error),
+        };
+        let transfer_id = match Uuid::parse_str(&transfer_id) {
+            Ok(value) => value,
+            Err(error) => return error_json(error),
+        };
+        let source = std::path::PathBuf::from(source_path);
+        if !source.is_file() {
+            return error_json("source file does not exist or is not a regular file");
+        }
+        let identity = match self.identity.lock() {
+            Ok(identity) => identity,
+            Err(_) => return error_json("identity lock poisoned"),
+        };
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => return error_json(error),
+        };
+        match runtime.block_on(crate::tcp::connect_and_send_with_id(
+            &invitation,
+            &identity,
+            &source,
+            &remote_name,
+            transfer_id,
+            |_| {},
+        )) {
+            Ok(()) => json!({ "ok": true, "transfer_id": transfer_id }).to_string(),
+            Err(error) => error_json(error),
+        }
+    }
 }
 
 #[cfg(test)]
