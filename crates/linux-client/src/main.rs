@@ -127,6 +127,7 @@ async fn send_file(
     let invitation = PairingInvitation::parse_qr_payload(invitation_payload)?;
     let identity = load_or_create_identity()?;
     println!("Sending {} to {}…", source_path.display(), invitation.identity.device_id);
+    println!("Transfer ID (reuse this if retrying): {transfer_id}");
     connect_and_send_with_id(
         &invitation,
         &identity,
