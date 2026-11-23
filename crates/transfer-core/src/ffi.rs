@@ -6,7 +6,7 @@
 use crate::{
     identity::LocalIdentity,
     pairing::{OneTimePairingToken, PairingInvitation},
-    tcp::{accept_one_resumable, connect_and_send_with_id},
+    tcp::accept_one_resumable,
     tls::DeviceTlsIdentity,
 };
 use serde_json::json;
@@ -128,21 +128,21 @@ pub struct TlsIdentityHandle {
 #[uniffi::export]
 impl TlsIdentityHandle {
     #[uniffi::constructor]
-    pub fn generate() -> Option<Arc<Self>> {
-        let identity = DeviceTlsIdentity::generate().ok()?;
-        Some(Arc::new(Self { identity: Mutex::new(identity) }))
+    pub fn generate() -> Result<Arc<Self>, crate::tls::TlsSetupError> {
+        let identity = DeviceTlsIdentity::generate()?;
+        Ok(Arc::new(Self { identity: Mutex::new(identity) }))
     }
 
     /// Restore certificate material from platform secure storage and validate
     /// that the certificate and private key can form a TLS server identity.
     #[uniffi::constructor]
-    pub fn restore(certificate_der: Vec<u8>, private_key_der: Vec<u8>) -> Option<Arc<Self>> {
+    pub fn restore(certificate_der: Vec<u8>, private_key_der: Vec<u8>) -> Result<Arc<Self>, crate::tls::TlsSetupError> {
         if certificate_der.is_empty() || private_key_der.is_empty() {
-            return None;
+            return Err(crate::tls::TlsSetupError::Certificate("certificate and private key must not be empty".into()));
         }
         let identity = DeviceTlsIdentity::from_der(certificate_der, private_key_der);
-        identity.server_acceptor().ok()?;
-        Some(Arc::new(Self { identity: Mutex::new(identity) }))
+        identity.server_acceptor()?;
+        Ok(Arc::new(Self { identity: Mutex::new(identity) }))
     }
 
     pub fn certificate_der(&self) -> Vec<u8> {
@@ -270,9 +270,7 @@ impl TransferReceiver {
     }
 }
 
-/// Opaque, long-lived native identity handle. Platform code keeps this handle
-/// for the active session; the secret key is never returned through UniFFI.
-#[derive(uniffi::Object)]
+/// Errors returned when restoring a persistent device identity.\n#[derive(Debug, thiserror::Error, uniffi::Error)]\npub enum TransferIdentityError {\n    #[error("Ed25519 seed must contain exactly 32 bytes")]\n    InvalidSeed,\n    #[error("device ID is not a valid UUID")]\n    InvalidDeviceId,\n}\n\n/// Opaque, long-lived native identity handle. Platform code keeps this handle\n/// for the active session; the secret key is never returned through UniFFI.\n#[derive(uniffi::Object)]
 pub struct TransferIdentity {
     identity: Mutex<LocalIdentity>,
 }
@@ -282,27 +280,27 @@ impl TransferIdentity {
     /// Restore an existing identity from a seed retrieved from secure storage.
     /// Invalid input returns None rather than generating a replacement identity.
     #[uniffi::constructor]
-    pub fn restore(device_id: String, mut seed: Vec<u8>) -> Option<Arc<Self>> {
+    pub fn restore(device_id: String, mut seed: Vec<u8>) -> Result<Arc<Self>, TransferIdentityError> {
         if seed.len() != 32 {
             seed.fill(0);
-            return None;
+            return Err(TransferIdentityError::InvalidSeed);
         }
         let id = match Uuid::parse_str(&device_id) {
             Ok(value) => value,
             Err(_) => {
                 seed.fill(0);
-                return None;
+                return Err(TransferIdentityError::InvalidDeviceId);
             }
         };
         let secret: [u8; 32] = match seed.as_slice().try_into() {
             Ok(value) => value,
             Err(_) => {
                 seed.fill(0);
-                return None;
+                return Err(TransferIdentityError::InvalidSeed);
             }
         };
         seed.fill(0);
-        Some(Arc::new(Self {
+        Ok(Arc::new(Self {
             identity: Mutex::new(LocalIdentity::from_secret(id, secret)),
         }))
     }
