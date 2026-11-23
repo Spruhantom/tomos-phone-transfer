@@ -270,7 +270,18 @@ impl TransferReceiver {
     }
 }
 
-/// Errors returned when restoring a persistent device identity.\n#[derive(Debug, thiserror::Error, uniffi::Error)]\npub enum TransferIdentityError {\n    #[error("Ed25519 seed must contain exactly 32 bytes")]\n    InvalidSeed,\n    #[error("device ID is not a valid UUID")]\n    InvalidDeviceId,\n}\n\n/// Opaque, long-lived native identity handle. Platform code keeps this handle\n/// for the active session; the secret key is never returned through UniFFI.\n#[derive(uniffi::Object)]
+/// Errors returned when restoring a persistent device identity.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum TransferIdentityError {
+    #[error("Ed25519 seed must contain exactly 32 bytes")]
+    InvalidSeed,
+    #[error("device ID is not a valid UUID")]
+    InvalidDeviceId,
+}
+
+/// Opaque, long-lived native identity handle. Platform code keeps this handle
+/// for the active session; the secret key is never returned through UniFFI.
+#[derive(uniffi::Object)]
 pub struct TransferIdentity {
     identity: Mutex<LocalIdentity>,
 }
