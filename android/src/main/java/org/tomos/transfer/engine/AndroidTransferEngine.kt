@@ -107,8 +107,8 @@ class AndroidTransferEngine(
             destination.absolutePath,
             state.absolutePath,
             object : TransferCallbacks {
-                override fun approvePeer(deviceId: String, publicKey: List<UByte>): Boolean =
-                    this@AndroidTransferEngine.approval.approvePeer(deviceId, publicKey.map { it.toInt() and 0xff }.toByteArray())
+                override fun approvePeer(deviceId: String, publicKey: ByteArray): Boolean =
+                    this@AndroidTransferEngine.approval.approvePeer(deviceId, publicKey.copyOf())
 
                 override fun approveFile(fileName: String, sizeBytes: ULong, sha256: String): Boolean =
                     this@AndroidTransferEngine.approval.approveFile(fileName, sizeBytes.toLong(), sha256)
@@ -162,7 +162,7 @@ class AndroidTransferEngine(
         }
     }
 
-    private fun stageUri(uri: Uri): StagedFile {
+    @Synchronized\n    fun close() {\n        identity?.close()\n        identity = null\n        tlsIdentity?.close()\n        tlsIdentity = null\n    }\n\n    private fun stageUri(uri: Uri): StagedFile {
         val displayName = contentResolver.query(
             uri,
             arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
