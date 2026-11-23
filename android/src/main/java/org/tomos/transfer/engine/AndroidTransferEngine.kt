@@ -146,7 +146,7 @@ class AndroidTransferEngine(
                 transferId.toString(),
                 object : TransferProgressCallbacks {
                     override fun onProgress(bytesSent: ULong, totalBytes: ULong, bytesPerSecond: ULong) {
-                        onProgress(
+                        this@AndroidTransferEngine.onProgress(
                             TransferProgress(
                                 bytesTransferred = bytesSent.toLong(),
                                 totalBytes = totalBytes.toLong(),
