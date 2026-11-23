@@ -2,7 +2,6 @@ package org.tomos.transfer.engine
 
 import android.content.ContentResolver
 import android.net.Uri
-import android.os.Environment
 import org.json.JSONObject
 import org.tomos.transfer.security.AndroidIdentityStore
 import org.tomos.transfer.security.AndroidTlsIdentityStore
@@ -84,7 +83,7 @@ class AndroidTransferEngine(
      * listening socket. The caller must display this payload as a QR code.
      */
     @Synchronized
-    fun createReceiver(advertisedHost: String, lifetimeSeconds: ULong = 300u): PreparedReceiver {
+    fun createReceiver(advertisedHost: String, lifetimeSeconds: ULong = 300uL): PreparedReceiver {
         require(advertisedHost.isNotBlank()) { "A reachable local network address is required" }
         val nativeIdentity = restoreIdentity()
         val receiver = nativeIdentity.createReceiver(
@@ -109,13 +108,13 @@ class AndroidTransferEngine(
             state.absolutePath,
             object : TransferCallbacks {
                 override fun approvePeer(deviceId: String, publicKey: List<UByte>): Boolean =
-                    approval.approvePeer(deviceId, publicKey.map { it.toInt() and 0xff }.toByteArray())
+                    this@AndroidTransferEngine.approval.approvePeer(deviceId, publicKey.map { it.toInt() and 0xff }.toByteArray())
 
                 override fun approveFile(fileName: String, sizeBytes: ULong, sha256: String): Boolean =
-                    approval.approveFile(fileName, sizeBytes.toLong(), sha256)
+                    this@AndroidTransferEngine.approval.approveFile(fileName, sizeBytes.toLong(), sha256)
 
                 override fun onProgress(bytesReceived: ULong, totalBytes: ULong, bytesPerSecond: ULong) {
-                    onProgress(
+                    this@AndroidTransferEngine.onProgress(
                         TransferProgress(
                             bytesTransferred = bytesReceived.toLong(),
                             totalBytes = totalBytes.toLong(),
@@ -184,7 +183,7 @@ class AndroidTransferEngine(
             contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(staged).use { output -> input.copyTo(output) }
             } ?: error("Android could not open the selected file")
-            check(staged.isFile && staged.length() > 0L) { "Selected file is empty or unavailable" }
+            check(staged.isFile) { "Selected file is unavailable" }
             return StagedFile(staged, safeName)
         } catch (failure: Exception) {
             staged.delete()
