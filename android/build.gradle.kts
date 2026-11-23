@@ -31,6 +31,8 @@ android {
 }
 
 dependencies {
+    // UniFFI Kotlin bindings use JNA to call the Rust shared library.
+    implementation("net.java.dev.jna:jna:5.14.0@aar")
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")

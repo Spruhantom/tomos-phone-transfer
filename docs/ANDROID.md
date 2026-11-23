@@ -1,53 +1,79 @@
-# Android application foundation
+# Android application
 
-The Android application lives in `:android` and uses Kotlin, Jetpack Compose,
-Android Keystore, Android NSD, and ZXing QR scanning. It is intended to share the
-Rust transfer engine with the Linux client; the native Rust bridge is a separate
-integration step and is not yet wired into the UI.
+The Android application lives in :android and uses Kotlin, Jetpack Compose,
+Android Keystore, Android NSD, and ZXing QR scanning. It shares the Rust transfer
+engine with the Linux client through UniFFI.
 
 ## Device identity storage
 
-`AndroidIdentityStore` generates a random 32-byte Ed25519 seed and a stable UUID
+AndroidIdentityStore generates a random 32-byte Ed25519 seed and a stable UUID
 on first launch. The seed is encrypted with an AES-256-GCM wrapping key held by
-Android Keystore. The encrypted record is stored under `noBackupFilesDir`,
+Android Keystore. The encrypted record is stored under noBackupFilesDir,
 excluded from Android backup, and authenticated with a versioned record header.
 
 The store deliberately fails closed if an existing identity record cannot be
-decrypted. It does not silently replace a lost or invalid identity, because doing
-so would create a different device identity and invalidate existing trust.
+decrypted. It does not silently replace a lost or invalid identity.
 
-The Rust core can restore its `LocalIdentity` from the UUID and seed using
-`LocalIdentity::from_secret`. The bridge must pass the seed only in process
-memory, never log it, and clear temporary byte arrays after importing it.
+The UniFFI TransferIdentity object restores this identity into a long-lived
+Rust handle. The seed is passed only in process memory and the Kotlin caller
+must clear its temporary byte array after construction.
+
+## TLS identity storage
+
+TlsIdentityHandle generates or restores the TLS leaf certificate and key.
+AndroidTlsIdentityStore encrypts the certificate and private-key DER with
+AES-256-GCM under the same non-exportable Android Keystore wrapping key. The
+private key is returned to Rust only when restoring the TLS handle and must
+never be logged or written to ordinary files.
+
+## Native engine API
+
+The current UniFFI surface provides:
+
+- Long-lived Ed25519 identity handles and challenge-proof generation.
+- TLS identity generation/restoration and secure-storage export.
+- Pairing QR payload generation and Rust-side invitation validation.
+- Receiver creation that binds the socket before returning the corresponding QR.
+- A one-shot resumable receive operation with explicit peer/file approval and
+  progress callbacks.
+- Authenticated file sending with a caller-supplied stable transfer UUID.
+
+The receiving API consumes each QR token once. After an interrupted session,
+the receiver creates a fresh invitation while retaining its resume-state
+directory; the sender retries using the same transfer UUID.
 
 ## Android interaction layer
 
 - QR scanner reads TomOS Transfer pairing invitations.
-- The invitation parser validates protocol version, device UUID, key length,
-  endpoint, expiry, one-time token shape, and SHA-256 certificate fingerprint.
-- Android NSD browses for `_tomos-transfer._tcp` devices on the local network.
+- Android NSD browses for _tomos-transfer._tcp devices on the local network.
 - The system document picker selects files without broad storage permissions.
-- Nearby discovery entries are displayed as untrusted hints only.
+- Nearby discovery entries remain untrusted hints until the Rust handshake
+  authenticates the peer.
 
-QR parsing is not authentication. The Rust engine must still validate the pinned
-certificate, perform TLS 1.3, complete mutual Ed25519 challenge-response, consume
-the one-time invitation token, and request user approval before transferring.
+QR parsing is not authentication. A transfer requires the QR-pinned TLS 1.3
+connection, mutual Ed25519 challenge-response, one-time token validation, and
+explicit peer/file approval.
 
 ## Build
 
-Requirements: JDK 17, Android SDK platform 35, and Gradle 8.9.
+Requirements: JDK 17, Android SDK platform 35, Android NDK 27.2.12479018,
+Rust stable, cargo-ndk, and Gradle 8.9.
 
 ```sh
+cargo install cargo-ndk --locked
+bash scripts/build-android-native.sh
 gradle :android:assembleDebug
 ```
 
+The script builds native libraries for arm64-v8a, armeabi-v7a, and x86_64 and
+generates Kotlin bindings using the workspace-local UniFFI bindgen executable.
+
 ## Current boundaries
 
-- The Compose UI is an initial interaction layer, not a completed transfer client.
-- JNI/UniFFI bridge to `tomos-transfer-core` is not implemented yet.
-- QR invitation validation is local only; it does not open a network connection.
-- mDNS discovery does not automatically trust or connect to devices.
-- File selection does not start a transfer until the Rust bridge is available.
-- Listener lifecycle, incoming transfer approval, transfer progress and resume UI
-  remain to be implemented.
-- Physical-device tests across Android and Linux remain outstanding.
+- The Rust bridge and receive/send APIs are implemented, but the Compose UI has
+  not yet been wired to those APIs.
+- Android listener lifecycle, QR rendering for the local receiver, content-URI
+  staging, approval prompts, progress UI, and resume controls remain to be
+  connected.
+- Android-to-Android and Android-to-Linux physical-device tests remain
+  outstanding.

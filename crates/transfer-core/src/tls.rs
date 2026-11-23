@@ -5,7 +5,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, uniffi::Error)]
 pub enum TlsSetupError {
     #[error("certificate generation failed: {0}")] Certificate(String),
     #[error("invalid trusted certificate: {0}")] Trust(String),

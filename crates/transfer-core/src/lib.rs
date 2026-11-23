@@ -14,6 +14,9 @@ pub mod tls;
 pub mod tcp;
 pub mod transfer;
 pub mod verification;
+pub mod ffi;
+
+uniffi::setup_scaffolding!();
 
 pub use device::{DeviceIdentity, DeviceInfo};
 pub use transfer::{receive_file, TransferError, TransferProgress, TransferResult};
