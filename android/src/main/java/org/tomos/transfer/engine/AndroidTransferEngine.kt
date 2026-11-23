@@ -162,7 +162,15 @@ class AndroidTransferEngine(
         }
     }
 
-    @Synchronized\n    fun close() {\n        identity?.close()\n        identity = null\n        tlsIdentity?.close()\n        tlsIdentity = null\n    }\n\n    private fun stageUri(uri: Uri): StagedFile {
+    @Synchronized
+    fun close() {
+        identity?.close()
+        identity = null
+        tlsIdentity?.close()
+        tlsIdentity = null
+    }
+
+    private fun stageUri(uri: Uri): StagedFile {
         val displayName = contentResolver.query(
             uri,
             arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
