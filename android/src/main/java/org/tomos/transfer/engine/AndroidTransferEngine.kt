@@ -207,7 +207,7 @@ class AndroidTransferEngine(
         return TransferResult(
             peerDeviceId = json.optString("peer_device_id").takeIf { it.isNotBlank() },
             path = json.optString("path").takeIf { it.isNotBlank() },
-            bytesTransferred = json.optLong("bytes_received", 0L),
+            bytesTransferred = json.optLong("bytes_received", json.optLong("bytes_sent", 0L)),
             sha256 = json.optString("sha256").takeIf { it.isNotBlank() },
             transferId = json.optString("transfer_id").takeIf { it.isNotBlank() }
         )
@@ -223,7 +223,9 @@ data class PreparedReceiver internal constructor(
     internal val receiver: uniffi.tomos_transfer_core.TransferReceiver,
     val pairingPayload: String,
     val port: UShort
-)
+) : AutoCloseable {
+    override fun close() = receiver.close()
+}
 
 data class TransferProgress(
     val bytesTransferred: Long,
