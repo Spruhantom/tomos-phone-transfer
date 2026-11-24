@@ -390,11 +390,12 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         discovery?.stop()
         discovery = null
-        activeReceiver?.let { receiver ->
-            activityScope.launch(Dispatchers.IO) { runCatching { receiver.close() } }
-        }
+        val receiver = activeReceiver
         activeReceiver = null
-        activityScope.launch(Dispatchers.IO) { runCatching { transferEngine.close() } }
+        Thread {
+            runCatching { receiver?.close() }
+            runCatching { transferEngine.close() }
+        }.start()
         activityScope.cancel()
         super.onDestroy()
     }
