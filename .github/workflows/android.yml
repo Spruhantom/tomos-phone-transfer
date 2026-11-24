@@ -53,5 +53,7 @@ jobs:
             android/src/main/java
             android/src/main/jniLibs
           if-no-files-found: error
+      - name: Run Android unit tests
+        run: gradle :android:testDebugUnitTest
       - name: Assemble debug application
         run: gradle :android:assembleDebug
