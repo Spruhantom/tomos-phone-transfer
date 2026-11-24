@@ -61,7 +61,7 @@ class AndroidIdentityStore(context: Context) {
         val nonce = bytes.copyOfRange(HEADER.size, HEADER.size + NONCE_SIZE)
         val encrypted = bytes.copyOfRange(HEADER.size + NONCE_SIZE, bytes.size)
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateWrappingKey(), GCMParameterSpec(TAG_BITS, nonce))
+        cipher.init(Cipher.DECRYPT_MODE, wrappingKey(create = false), GCMParameterSpec(TAG_BITS, nonce))
         cipher.updateAAD(HEADER)
         val plain = cipher.doFinal(encrypted)
         try {
@@ -84,7 +84,7 @@ class AndroidIdentityStore(context: Context) {
             .array()
 
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateWrappingKey())
+        cipher.init(Cipher.ENCRYPT_MODE, wrappingKey(create = true))
         cipher.updateAAD(HEADER)
         val encrypted = cipher.doFinal(plain)
         plain.fill(0)
@@ -115,9 +115,10 @@ class AndroidIdentityStore(context: Context) {
         }
     }
 
-    private fun getOrCreateWrappingKey(): SecretKey {
+    private fun wrappingKey(create: Boolean): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        check(create) { "Android Keystore wrapping key is missing for an existing device identity" }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
