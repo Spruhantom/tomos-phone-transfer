@@ -57,6 +57,12 @@ jobs:
         run: gradle :android:testDebugUnitTest
       - name: Assemble debug application
         run: gradle :android:assembleDebug
+      - name: Upload debug APK for physical-device testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: tomos-transfer-debug-apk
+          path: android/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
       - name: Run Android instrumentation tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
