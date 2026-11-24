@@ -224,7 +224,10 @@ data class PreparedReceiver internal constructor(
     val pairingPayload: String,
     val port: UShort
 ) : AutoCloseable {
-    override fun close() = receiver.close()
+    override fun close() {
+        receiver.cancel()
+        receiver.close()
+    }
 }
 
 data class TransferProgress(
