@@ -203,7 +203,7 @@ impl TransferReceiver {
     /// Cancel an active or pending receive operation, dropping its socket future.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
-        self.cancellation.notify_waiters();
+        self.cancellation.notify_one();
     }
 
     /// Wait for one sender. This is a blocking call and must run on a worker
