@@ -78,25 +78,29 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
             set +e
+            DIAG_DIR="$GITHUB_WORKSPACE/android-ci-diagnostics"
+            mkdir -p "$DIAG_DIR"
+
+            # Stream logcat while tests run; this preserves fatal process and
+            # instrumentation crash messages even if the test runner exits early.
             adb logcat -c
-            gradle :android:connectedDebugAndroidTest
+            adb logcat -b all -v threadtime > "$DIAG_DIR/logcat.txt" 2>&1 &
+            LOGCAT_PID=$!
+
+            gradle :android:connectedDebugAndroidTest --info
             test_status=$?
 
-            # Capture instrumentation diagnostics before the emulator runner
-            # tears the device down, including failures that execute zero tests.
-            adb logcat -d -b all -v threadtime > "$RUNNER_TEMP/android-instrumentation-logcat.txt" || true
-            adb shell dumpsys activity instrumentation > "$RUNNER_TEMP/android-instrumentation-state.txt" 2>&1 || true
-            adb shell pm list instrumentation > "$RUNNER_TEMP/android-instrumentations.txt" 2>&1 || true
-            adb shell dumpsys package org.tomos.transfer.test > "$RUNNER_TEMP/android-test-package.txt" 2>&1 || true
+            kill "$LOGCAT_PID" 2>/dev/null || true
+            wait "$LOGCAT_PID" 2>/dev/null || true
+            adb shell dumpsys activity instrumentation > "$DIAG_DIR/instrumentation-state.txt" 2>&1 || true
+            adb shell pm list instrumentation > "$DIAG_DIR/instrumentations.txt" 2>&1 || true
+            adb shell dumpsys package org.tomos.transfer.test > "$DIAG_DIR/test-package.txt" 2>&1 || true
+            adb shell getprop > "$DIAG_DIR/device-properties.txt" 2>&1 || true
             exit "$test_status"
       - name: Upload Android instrumentation diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: android-instrumentation-diagnostics
-          path: |
-            ${{ runner.temp }}/android-instrumentation-logcat.txt
-            ${{ runner.temp }}/android-instrumentation-state.txt
-            ${{ runner.temp }}/android-instrumentations.txt
-            ${{ runner.temp }}/android-test-package.txt
-          if-no-files-found: ignore
+          path: android-ci-diagnostics/
+          if-no-files-found: warn
