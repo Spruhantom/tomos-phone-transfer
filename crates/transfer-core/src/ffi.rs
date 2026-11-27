@@ -12,7 +12,8 @@ use crate::{
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-use std::{net::TcpListener as StdTcpListener, path::Path, sync::{Arc, Mutex}};
+use std::{net::TcpListener as StdTcpListener, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}};
+use tokio::sync::Notify;
 use tokio_rustls::TlsAcceptor;
 
 fn error_json(message: impl std::fmt::Display) -> String {
@@ -185,6 +186,8 @@ pub struct TransferReceiver {
     identity: Mutex<LocalIdentity>,
     acceptor: TlsAcceptor,
     invitation: PairingInvitation,
+    cancelled: Arc<AtomicBool>,
+    cancellation: Arc<Notify>,
 }
 
 #[uniffi::export]
@@ -195,6 +198,12 @@ impl TransferReceiver {
 
     pub fn port(&self) -> u16 {
         self.invitation.port
+    }
+
+    /// Cancel an active or pending receive operation, dropping its socket future.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        self.cancellation.notify_one();
     }
 
     /// Wait for one sender. This is a blocking call and must run on a worker
@@ -226,9 +235,11 @@ impl TransferReceiver {
             Ok(runtime) => runtime,
             Err(error) => return error_json(error),
         };
+        let cancelled = Arc::clone(&self.cancelled);
+        let cancellation = Arc::clone(&self.cancellation);
         let result = runtime.block_on(async {
             let listener = tokio::net::TcpListener::from_std(listener)?;
-            accept_one_resumable(
+            let receive = accept_one_resumable(
                 &listener,
                 &self.acceptor,
                 &identity,
@@ -255,7 +266,19 @@ impl TransferReceiver {
                         progress.bytes_per_second,
                     );
                 },
-            ).await
+            );
+            tokio::pin!(receive);
+            tokio::select! {
+                result = &mut receive => result,
+                _ = async {
+                    if !cancelled.load(Ordering::Acquire) {
+                        cancellation.notified().await;
+                    }
+                } => Err(crate::tcp::TcpTransferError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "receiver cancelled",
+                ))),
+            }
         });
         match result {
             Ok((peer, transfer)) => json!({
@@ -393,6 +416,8 @@ impl TransferIdentity {
             identity: Mutex::new(identity_copy),
             acceptor,
             invitation,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            cancellation: Arc::new(Notify::new()),
         }))
     }
 
@@ -452,6 +477,37 @@ impl TransferIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    struct RejectingCallbacks;
+
+    impl TransferCallbacks for RejectingCallbacks {
+        fn approve_peer(&self, _device_id: String, _public_key: Vec<u8>) -> bool { false }
+        fn approve_file(&self, _file_name: String, _size_bytes: u64, _sha256: String) -> bool { false }
+        fn on_progress(&self, _bytes_received: u64, _total_bytes: u64, _bytes_per_second: u64) {}
+    }
+
+    #[test]
+    fn cancelling_receiver_interrupts_pending_accept() {
+        let identity = TransferIdentity::restore(Uuid::new_v4().to_string(), vec![3; 32]).unwrap();
+        let tls = TlsIdentityHandle::generate().unwrap();
+        let receiver = identity.create_receiver(
+            "127.0.0.1".to_string(), "127.0.0.1:0".to_string(), tls, 120,
+        ).unwrap();
+        let receiving = Arc::clone(&receiver);
+        let destination = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let destination_path = destination.path().to_string_lossy().into_owned();
+        let state_path = state.path().to_string_lossy().into_owned();
+        let worker = std::thread::spawn(move || {
+            receiving.receive_once(destination_path, state_path, Box::new(RejectingCallbacks))
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        receiver.cancel();
+        let result: serde_json::Value = serde_json::from_str(&worker.join().unwrap()).unwrap();
+        assert_eq!(result["ok"], false);
+        assert!(result["error"].as_str().unwrap().contains("receiver cancelled"));
+    }
 
     #[test]
     fn ffi_restores_existing_identity_without_changing_public_key() {
