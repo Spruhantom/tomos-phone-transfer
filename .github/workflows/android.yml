@@ -76,4 +76,27 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 600
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: gradle :android:connectedDebugAndroidTest
+          script: |
+            set +e
+            adb logcat -c
+            gradle :android:connectedDebugAndroidTest
+            test_status=$?
+
+            # Capture instrumentation diagnostics before the emulator runner
+            # tears the device down, including failures that execute zero tests.
+            adb logcat -d -b all -v threadtime > "$RUNNER_TEMP/android-instrumentation-logcat.txt" || true
+            adb shell dumpsys activity instrumentation > "$RUNNER_TEMP/android-instrumentation-state.txt" 2>&1 || true
+            adb shell pm list instrumentation > "$RUNNER_TEMP/android-instrumentations.txt" 2>&1 || true
+            adb shell dumpsys package org.tomos.transfer.test > "$RUNNER_TEMP/android-test-package.txt" 2>&1 || true
+            exit "$test_status"
+      - name: Upload Android instrumentation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-instrumentation-diagnostics
+          path: |
+            ${{ runner.temp }}/android-instrumentation-logcat.txt
+            ${{ runner.temp }}/android-instrumentation-state.txt
+            ${{ runner.temp }}/android-instrumentations.txt
+            ${{ runner.temp }}/android-test-package.txt
+          if-no-files-found: ignore
