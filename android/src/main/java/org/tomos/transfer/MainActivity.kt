@@ -290,7 +290,15 @@ class MainActivity : ComponentActivity() {
             }.onSuccess { (receiver, bitmap) ->
                 activeReceiver = receiver
                 receiverQr = bitmap
-                receiverStatus = "Waiting for one authenticated incoming transfer on port ${receiver.port}"
+                val advertised = runCatching {
+                    discovery?.startAdvertising(receiver.port.toInt())
+                    discovery?.start()
+                }.isSuccess
+                receiverStatus = if (advertised) {
+                    "Waiting for one authenticated incoming transfer on port ${receiver.port}; nearby discovery is active"
+                } else {
+                    "Waiting for one authenticated incoming transfer on port ${receiver.port}; QR pairing remains available"
+                }
                 activityScope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) { transferEngine.receiveOnce(receiver) }
@@ -304,6 +312,7 @@ class MainActivity : ComponentActivity() {
                     if (activeReceiver === receiver) {
                         activeReceiver = null
                         receiverQr = null
+                        discovery?.stopAdvertising()
                         withContext(Dispatchers.IO) { receiver.close() }
                     }
                 }
@@ -317,6 +326,7 @@ class MainActivity : ComponentActivity() {
         val receiver = activeReceiver ?: return
         activeReceiver = null
         receiverQr = null
+        discovery?.stopAdvertising()
         receiverStatus = "Closing receiver…"
         activityScope.launch(Dispatchers.IO) {
             runCatching { receiver.close() }
@@ -388,7 +398,7 @@ class MainActivity : ComponentActivity() {
             (result.path?.let { "\nSaved at: $it" } ?: "")
 
     override fun onDestroy() {
-        discovery?.stop()
+        discovery?.close()
         discovery = null
         val receiver = activeReceiver
         activeReceiver = null

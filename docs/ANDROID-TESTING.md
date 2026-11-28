@@ -33,7 +33,11 @@ Open TomOS Transfer and verify the following, recording the phone model and Andr
 
 - App launches and reports that its secure device identity is ready.
 - Close and reopen the app; the same device identity is restored.
-- Create a receive QR code and scan it from a second device.
+- Create a receive QR code and confirm the receiver advertises a `_tomos-transfer._tcp` DNS-SD service.
+- Find devices on the second phone and confirm the advertised host/port matches the active receiver.
+- Stop the receiver and confirm its DNS-SD advertisement disappears.
+- Create a new receiver and confirm a fresh advertisement appears.
+- Scan the receive QR code from the second device.
 - Reject an unexpected peer and confirm no transfer starts.
 - Approve a known peer and a test file; confirm the received bytes and SHA-256 match.
 - Reject a file and confirm it is not saved.
