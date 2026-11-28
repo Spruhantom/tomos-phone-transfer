@@ -1,0 +1,5 @@
+# UniFFI Kotlin bindings must remain compatible with Android API 26.
+# java.lang.ref.Cleaner is only available from API 33 on Android, so use
+# the JNA-provided cleaner shipped with the app's existing JNA dependency.
+[bindings.kotlin]
+disable_java_cleaner = true

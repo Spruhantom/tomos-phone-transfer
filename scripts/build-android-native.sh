@@ -28,4 +28,11 @@ cargo run --release -p uniffi-bindgen -- generate \
   --language kotlin \
   --out-dir android/src/main/java
 
-echo "Android Rust libraries and Kotlin UniFFI bindings generated."
+# Guard the Android API 26 minimum: UniFFI must generate the JNA cleaner,
+# not java.lang.ref.Cleaner (which requires API 33 on Android).
+if grep -R -n -F "java.lang.ref.Cleaner.create()" android/src/main/java; then
+  echo "Generated UniFFI bindings reference API 33 Cleaner; check crates/transfer-core/uniffi.toml." >&2
+  exit 1
+fi
+
+echo "Android Rust libraries and API 26-compatible Kotlin UniFFI bindings generated."
